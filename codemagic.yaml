@@ -1,51 +1,11 @@
 workflows:
-  ios-ipa:
-    name: iOS IPA (sans TestFlight)
-    max_build_duration: 60
-    instance_type: mac_mini_m2
-    environment:
-      groups:
-        - creche_credentials
-      node: 20
-      xcode: latest
-      cocoapods: default
-      vars:
-        XCODE_WORKSPACE: "Creche.xcworkspace"
-        XCODE_SCHEME: "Creche"
-    scripts:
-      - name: Install dependencies
-        script: |
-          npm ci
-      - name: Prebuild iOS
-        script: |
-          cd mobile
-          npx expo prebuild --platform ios --clean
-      - name: Install CocoaPods
-        script: |
-          cd mobile/ios && pod install
-      - name: Set up code signing
-        script: |
-          xcode-project use-profiles
-      - name: Build IPA
-        script: |
-          cd mobile/ios
-          xcode-project build-ipa \
-            --workspace "$XCODE_WORKSPACE" \
-            --scheme "$XCODE_SCHEME"
-    artifacts:
-      - mobile/ios/build/ios/ipa/*.ipa
-      - /tmp/xcodebuild_logs/*.log
-
   ios-testflight:
     name: iOS TestFlight
     max_build_duration: 60
     instance_type: mac_mini_m2
-    integrations:
-      # Doit correspondre EXACTEMENT au nom de l'intégration
-      # créée dans Codemagic → Teams → Integrations → App Store Connect
-      app_store_connect: App Store Connect
     environment:
       groups:
+        - appstore_credentials
         - creche_credentials
       node: 20
       xcode: latest
@@ -53,6 +13,7 @@ workflows:
       vars:
         XCODE_WORKSPACE: "Creche.xcworkspace"
         XCODE_SCHEME: "Creche"
+        BUNDLE_ID: "fr.creche.app"
     scripts:
       - name: Install dependencies
         script: |
@@ -64,7 +25,15 @@ workflows:
       - name: Install CocoaPods
         script: |
           cd mobile/ios && pod install
-      - name: Set up code signing
+      - name: Set up keychain and certificates
+        script: |
+          keychain initialize
+      - name: Fetch signing files from App Store Connect
+        script: |
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --create
+      - name: Use provisioning profiles
         script: |
           xcode-project use-profiles
       - name: Build IPA
@@ -78,7 +47,9 @@ workflows:
       - /tmp/xcodebuild_logs/*.log
     publishing:
       app_store_connect:
-        auth: integration
+        api_key: $APP_STORE_CONNECT_PRIVATE_KEY
+        key_id: $APP_STORE_CONNECT_KEY_IDENTIFIER
+        issuer_id: $APP_STORE_CONNECT_ISSUER_ID
         submit_to_testflight: true
 
   android-aab:
