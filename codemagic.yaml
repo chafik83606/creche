@@ -1,0 +1,68 @@
+workflows:
+  ios-testflight:
+    name: iOS TestFlight
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    integrations:
+      app_store_connect: Codemagic
+    environment:
+      groups:
+        - creche_credentials
+      vars:
+        XCODE_WORKSPACE: "Creche.xcworkspace"
+        XCODE_SCHEME: "Creche"
+      node: 20
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Install dependencies
+        script: |
+          npm ci
+          cd mobile && npx expo install --fix
+      - name: Prebuild iOS
+        script: |
+          cd mobile
+          npx expo prebuild --platform ios --clean
+      - name: Install CocoaPods
+        script: |
+          cd mobile/ios && pod install
+      - name: Build IPA
+        script: |
+          cd mobile/ios
+          xcode-project build-ipa \
+            --workspace "$XCODE_WORKSPACE" \
+            --scheme "$XCODE_SCHEME"
+    artifacts:
+      - mobile/ios/build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        beta_groups: []
+
+  android-aab:
+    name: Android AAB (Play Internal)
+    max_build_duration: 60
+    instance_type: linux_x2
+    environment:
+      groups:
+        - creche_credentials
+      node: 20
+      java: 17
+      vars:
+        PACKAGE_NAME: "fr.creche.app"
+    scripts:
+      - name: Install dependencies
+        script: |
+          npm ci
+      - name: Prebuild Android
+        script: |
+          cd mobile
+          npx expo prebuild --platform android --clean
+      - name: Build AAB
+        script: |
+          cd mobile/android
+          ./gradlew bundleRelease
+    artifacts:
+      - mobile/android/app/build/outputs/bundle/release/*.aab

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "213510187132",
+    "project_id": "creche-soinzen",
+    "storage_bucket": "creche-soinzen.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:213510187132:android:164fd2a61f1b323d3ac1f9",
+        "android_client_info": {
+          "package_name": "fr.creche.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD7lK2ABlLAfzXImpKVDGiPQKALfiDeXA4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
