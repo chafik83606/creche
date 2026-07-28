@@ -2,7 +2,8 @@ node_modules/
 .expo/
 dist/
 .next/
-lib/
+# Build output only (do not ignore app source dirs like mobile/lib or web/src/lib)
+firebase/functions/lib/
 *.local
 .env
 .env.*
