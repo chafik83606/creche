@@ -16,6 +16,8 @@ firebase/service-account.json
 **/service-account*.json
 *.keystore
 *.jks
+ios_distribution_private_key.pem
+ios_distribution_private_key
 .idea/
 mobile/android/.gradle/
 mobile/android/app/build/

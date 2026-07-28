@@ -29,9 +29,14 @@ workflows:
           keychain initialize
       - name: Fetch signing files from App Store Connect
         script: |
+          # Requires CERTIFICATE_PRIVATE_KEY in appstore_credentials
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
-            --create
+            --create \
+            --certificate-key=@env:CERTIFICATE_PRIVATE_KEY
+      - name: Add certificates to keychain
+        script: |
+          keychain add-certificates
       - name: Use provisioning profiles
         script: |
           xcode-project use-profiles
