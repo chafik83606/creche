@@ -1,0 +1,7 @@
+{
+  "projects": {
+    "default": "creche-soinzen",
+    "demo": "demo-creche",
+    "production": "creche-soinzen"
+  }
+}

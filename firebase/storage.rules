@@ -1,0 +1,44 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function hasTenantAccess(tenantId) {
+      return isAuthenticated()
+        && request.auth.token.tenantIds != null
+        && tenantId in request.auth.token.tenantIds;
+    }
+
+    function isStaff() {
+      return request.auth.token.role in ['network_admin', 'director', 'educator'];
+    }
+
+    function parentOwnsChild(childId) {
+      return request.auth.token.role == 'parent'
+        && childId in request.auth.token.childIds;
+    }
+
+    // Photos enfants : tenants/{tenantId}/children/{childId}/photos/{fileName}
+    match /tenants/{tenantId}/children/{childId}/photos/{fileName} {
+      allow read: if hasTenantAccess(tenantId)
+        && (isStaff() || parentOwnsChild(childId));
+      allow write: if hasTenantAccess(tenantId) && isStaff()
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+      allow delete: if hasTenantAccess(tenantId)
+        && request.auth.token.role in ['network_admin', 'director'];
+    }
+
+    // Photos activités (dans le carnet quotidien)
+    match /tenants/{tenantId}/children/{childId}/activities/{fileName} {
+      allow read: if hasTenantAccess(tenantId)
+        && (isStaff() || parentOwnsChild(childId));
+      allow write: if hasTenantAccess(tenantId) && isStaff()
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+  }
+}

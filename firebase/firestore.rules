@@ -1,0 +1,166 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ─── Helpers ─────────────────────────────────────────────────────────────
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getRole() {
+      return request.auth.token.role;
+    }
+
+    function hasTenantAccess(tenantId) {
+      return isAuthenticated()
+        && request.auth.token.tenantIds != null
+        && tenantId in request.auth.token.tenantIds;
+    }
+
+    function isNetworkAdmin() {
+      return getRole() == 'network_admin';
+    }
+
+    function isDirector() {
+      return getRole() == 'director';
+    }
+
+    function isEducator() {
+      return getRole() == 'educator';
+    }
+
+    function isParent() {
+      return getRole() == 'parent';
+    }
+
+    function isStaff() {
+      return getRole() in ['network_admin', 'director', 'educator'];
+    }
+
+    function isManagement() {
+      return getRole() in ['network_admin', 'director'];
+    }
+
+    function memberDoc(tenantId) {
+      return get(/databases/$(database)/documents/tenants/$(tenantId)/members/$(request.auth.uid));
+    }
+
+    function isMemberOf(tenantId) {
+      return hasTenantAccess(tenantId)
+        && exists(/databases/$(database)/documents/tenants/$(tenantId)/members/$(request.auth.uid));
+    }
+
+    function parentOwnsChild(tenantId, childId) {
+      return isParent()
+        && childId in request.auth.token.childIds;
+    }
+
+    function educatorInGroup(tenantId, groupId) {
+      return isEducator()
+        && groupId in memberDoc(tenantId).data.groupIds;
+    }
+
+    function childInEducatorGroup(tenantId, childId) {
+      let child = get(/databases/$(database)/documents/tenants/$(tenantId)/children/$(childId));
+      return isEducator() && educatorInGroup(tenantId, child.data.groupId);
+    }
+
+    // ─── Tenants ─────────────────────────────────────────────────────────────
+
+    match /tenants/{tenantId} {
+      allow read: if isMemberOf(tenantId);
+      allow create: if isNetworkAdmin();
+      allow update: if isManagement() && isMemberOf(tenantId);
+      allow delete: if isNetworkAdmin();
+
+      // ─── Membres ───────────────────────────────────────────────────────────
+      match /members/{uid} {
+        allow read: if isMemberOf(tenantId);
+        allow create: if isManagement() && isMemberOf(tenantId);
+        allow update: if isManagement() && isMemberOf(tenantId)
+          || (uid == request.auth.uid && isMemberOf(tenantId));
+        allow delete: if isManagement() && isMemberOf(tenantId);
+      }
+
+      // ─── Groupes ───────────────────────────────────────────────────────────
+      match /groups/{groupId} {
+        allow read: if isMemberOf(tenantId);
+        allow write: if isManagement() && isMemberOf(tenantId);
+      }
+
+      // ─── Enfants ───────────────────────────────────────────────────────────
+      match /children/{childId} {
+        allow read: if isMemberOf(tenantId)
+          && (isStaff() || parentOwnsChild(tenantId, childId));
+        allow create, update: if isManagement() && isMemberOf(tenantId);
+        allow delete: if isNetworkAdmin() && isMemberOf(tenantId);
+
+        // ─── Carnet quotidien ──────────────────────────────────────────────
+        match /dailyLogs/{date} {
+          allow read: if isMemberOf(tenantId)
+            && (isStaff() || parentOwnsChild(tenantId, childId));
+          allow create, update: if isMemberOf(tenantId)
+            && (isManagement() || childInEducatorGroup(tenantId, childId));
+          allow delete: if isManagement() && isMemberOf(tenantId);
+        }
+
+        // ─── Album photo ───────────────────────────────────────────────────
+        match /photos/{photoId} {
+          allow read: if isMemberOf(tenantId)
+            && (isStaff() || parentOwnsChild(tenantId, childId));
+          allow create: if isMemberOf(tenantId)
+            && (isManagement() || childInEducatorGroup(tenantId, childId));
+          allow delete: if isManagement() && isMemberOf(tenantId);
+        }
+      }
+
+      // ─── Annonces globales ───────────────────────────────────────────────
+      match /announcements/{msgId} {
+        allow read: if isMemberOf(tenantId);
+        allow create: if isManagement() && isMemberOf(tenantId);
+        allow update, delete: if isManagement() && isMemberOf(tenantId);
+
+        match /acks/{parentId} {
+          allow read: if isMemberOf(tenantId);
+          allow create: if isParent()
+            && isMemberOf(tenantId)
+            && parentId == request.auth.uid;
+        }
+      }
+
+      // ─── Messages privés ─────────────────────────────────────────────────
+      match /privateMessages/{msgId} {
+        allow read: if isMemberOf(tenantId)
+          && (resource.data.senderId == request.auth.uid
+              || resource.data.recipientId == request.auth.uid
+              || isManagement());
+        allow create: if isMemberOf(tenantId)
+          && request.resource.data.senderId == request.auth.uid
+          && (isStaff() || isParent());
+        allow update: if isMemberOf(tenantId)
+          && resource.data.recipientId == request.auth.uid;
+      }
+
+      // ─── Consentements RGPD ──────────────────────────────────────────────
+      match /consents/{consentId} {
+        allow read: if isMemberOf(tenantId)
+          && (resource.data.parentId == request.auth.uid || isManagement());
+        allow create: if isParent()
+          && isMemberOf(tenantId)
+          && request.resource.data.parentId == request.auth.uid;
+        allow update: if isParent()
+          && isMemberOf(tenantId)
+          && resource.data.parentId == request.auth.uid;
+      }
+
+      // ─── Invitations parents ─────────────────────────────────────────────
+      match /invitations/{inviteId} {
+        allow read: if isManagement() && isMemberOf(tenantId);
+        allow create: if isManagement() && isMemberOf(tenantId);
+        allow update: if isManagement() && isMemberOf(tenantId);
+      }
+    }
+  }
+}

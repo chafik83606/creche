@@ -1,0 +1,45 @@
+{
+  "expo": {
+    "name": "Crèche",
+    "slug": "creche",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "creche",
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#4a90d9",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "package": "fr.creche.app",
+      "versionCode": 1,
+      "googleServicesFile": "./google-services.json"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "fr.creche.app",
+      "googleServicesFile": "./GoogleService-Info.plist"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#4a90d9"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "2ae1b4b8-2440-429b-b1d3-0dfaf4966ffa"
+      }
+    },
+    "owner": "chafik83s-team"
+  }
+}

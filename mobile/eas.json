@@ -1,0 +1,41 @@
+{
+  "cli": {
+    "version": ">= 12.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_USE_EMULATORS": "false"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_USE_EMULATORS": "false"
+      }
+    },
+    "play-internal": {
+      "distribution": "store",
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "env": {
+        "EXPO_PUBLIC_USE_EMULATORS": "false"
+      }
+    },
+    "production": {
+      "env": {
+        "EXPO_PUBLIC_USE_EMULATORS": "false"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

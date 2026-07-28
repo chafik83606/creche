@@ -1,0 +1,26 @@
+{
+  "name": "creche",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "shared",
+    "mobile",
+    "web",
+    "firebase/functions"
+  ],
+  "scripts": {
+    "mobile": "npm run start --workspace=mobile",
+    "mobile:tunnel": "npm run start:tunnel --workspace=mobile",
+    "mobile:build:android:aab": "npm run build:play-internal --workspace=mobile",
+    "web": "npm run dev --workspace=web",
+    "functions:build": "npm run build --workspace=creche-functions",
+    "firebase:emulators": "cd firebase && firebase emulators:start",
+    "firebase:deploy": "cd firebase && firebase deploy",
+    "seed": "node scripts/seed-tenant.js",
+    "setup": "npm install && npm run functions:build",
+    "dev:all": "concurrently \"npm run firebase:emulators\" \"npm run web\" \"npm run mobile\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}
