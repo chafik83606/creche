@@ -52,12 +52,31 @@ workflows:
       - name: Install CocoaPods
         script: |
           cd mobile/ios && pod install
-      - name: Configure Xcode Node path
+      - name: Configure Xcode Node / monorepo project root
         script: |
+          # Avec mobile/node_modules -> ../node_modules, le script RN calcule
+          # PROJECT_ROOT = monorepo root (pas mobile/). Sans ce fix, ENTRY_FILE
+          # (index.ts) est cherché à la racine et le bundle échoue (exit 65).
           cd mobile/ios
-          echo "export NODE_BINARY=$(which node)" > .xcode.env.local
-          echo "export ENTRY_FILE=index.ts" >> .xcode.env.local
+          {
+            echo "export NODE_BINARY=$(which node)"
+            echo 'export PROJECT_ROOT="${SRCROOT}/.."'
+            echo 'export ENTRY_FILE=index.ts'
+          } > .xcode.env.local
           cat .xcode.env.local
+      - name: Verify JS bundle (surface Metro errors)
+        script: |
+          set -e
+          cd mobile
+          mkdir -p /tmp/creche-bundle
+          npx expo export:embed \
+            --platform ios \
+            --entry-file index.ts \
+            --bundle-output /tmp/creche-bundle/main.jsbundle \
+            --assets-dest /tmp/creche-bundle \
+            --dev false \
+            --minify true
+          ls -la /tmp/creche-bundle/main.jsbundle
       - name: Set up keychain and certificates
         script: |
           keychain initialize
@@ -83,7 +102,12 @@ workflows:
           echo "Using scheme: $SCHEME"
           xcode-project build-ipa \
             --workspace "$WORKSPACE" \
-            --scheme "$SCHEME"
+            --scheme "$SCHEME" || {
+              echo "===== Bundle RN script logs (if any) ====="
+              find "$HOME/Library/Developer/Xcode/DerivedData" -name '*Script-00DD1BFF*' -o -name '*Bundle*React*' 2>/dev/null | head -n 20 || true
+              ls -la /tmp/xcodebuild_logs 2>/dev/null || true
+              exit 1
+            }
     artifacts:
       - mobile/ios/build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
