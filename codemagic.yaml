@@ -6,7 +6,6 @@ workflows:
     environment:
       groups:
         - appstore_credentials
-        - creche_credentials
       node: 20
       xcode: latest
       cocoapods: default
@@ -57,8 +56,6 @@ workflows:
     max_build_duration: 60
     instance_type: linux_x2
     environment:
-      groups:
-        - creche_credentials
       node: 20
       java: 17
     scripts:
