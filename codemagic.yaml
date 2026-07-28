@@ -6,8 +6,8 @@ workflows:
     environment:
       groups:
         - appstore_credentials
-      # Pin Xcode — "latest" (26.x) est trop récent pour Expo SDK 57
-      xcode: 16.4
+      # Expo SDK 57 / expo-modules-jsi exige Xcode 26.4+ (Swift 6.3, weak let)
+      xcode: 26.4
       node: 20
       cocoapods: default
       vars:
