@@ -35,6 +35,21 @@ workflows:
             "EXPO_PUBLIC_FIREBASE_APP_ID=$EXPO_PUBLIC_FIREBASE_APP_ID" \
             "EXPO_PUBLIC_USE_EMULATORS=$EXPO_PUBLIC_USE_EMULATORS" \
             > .env
+      - name: Set native build numbers
+        script: |
+          # CFBundleVersion / versionCode doivent augmenter à chaque upload store.
+          cd mobile
+          node <<'NODE'
+          const fs = require('fs');
+          const build = String(process.env.BUILD_NUMBER || '2');
+          const app = JSON.parse(fs.readFileSync('app.json', 'utf8'));
+          app.expo.ios = app.expo.ios || {};
+          app.expo.android = app.expo.android || {};
+          app.expo.ios.buildNumber = build;
+          app.expo.android.versionCode = parseInt(build, 10);
+          fs.writeFileSync('app.json', JSON.stringify(app, null, 2) + '\n');
+          console.log('iOS buildNumber:', build, '| Android versionCode:', build);
+          NODE
       - name: Prebuild iOS
         script: |
           cd mobile
