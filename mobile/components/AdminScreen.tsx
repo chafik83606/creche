@@ -11,7 +11,7 @@ import {
   Modal,
   FlatList,
 } from 'react-native';
-import { collection, doc, getDoc, getDocs, onSnapshot } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, onSnapshot, addDoc, serverTimestamp } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { auth, db, functions } from '../lib/firebase';
 import { getCallableErrorMessage } from '../lib/callable-error';
@@ -57,6 +57,14 @@ export function AdminScreen({ tenantId, tenantIds, onTenantChange }: Props) {
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showCreateTenantModal, setShowCreateTenantModal] = useState(false);
+  const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
+  const [showCreateChildModal, setShowCreateChildModal] = useState(false);
+
+  const [newGroupName, setNewGroupName] = useState('');
+  const [newChildFirstName, setNewChildFirstName] = useState('');
+  const [newChildLastName, setNewChildLastName] = useState('');
+  const [newChildGroupId, setNewChildGroupId] = useState('');
+  const [newChildDob, setNewChildDob] = useState('2023-06-15');
 
   const [assignEmail, setAssignEmail] = useState('');
   const [assignRole, setAssignRole] = useState<UserRole>('parent');
@@ -174,6 +182,63 @@ export function AdminScreen({ tenantId, tenantIds, onTenantChange }: Props) {
     }
   }
 
+  async function handleCreateGroup() {
+    const name = newGroupName.trim();
+    if (!name) return Alert.alert('Erreur', 'Indiquez un nom de groupe.');
+    setPending(true);
+    try {
+      await addDoc(collection(db, paths.groups(tenantId)), {
+        name,
+        educatorIds: [],
+        createdAt: serverTimestamp(),
+      });
+      await loadStaticData();
+      Alert.alert('Groupe créé', `Le groupe « ${name} » a été ajouté.`);
+      setShowCreateGroupModal(false);
+      setNewGroupName('');
+    } catch (error) {
+      Alert.alert('Erreur', getCallableErrorMessage(error, 'Impossible de créer le groupe.'));
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function handleCreateChild() {
+    const firstName = newChildFirstName.trim();
+    const lastName = newChildLastName.trim();
+    if (!firstName || !lastName) {
+      return Alert.alert('Erreur', 'Prénom et nom requis.');
+    }
+    if (!newChildGroupId) {
+      return Alert.alert('Erreur', 'Sélectionnez un groupe (créez-en un si besoin).');
+    }
+    setPending(true);
+    try {
+      await addDoc(collection(db, paths.children(tenantId)), {
+        firstName,
+        lastName,
+        dateOfBirth: new Date(newChildDob),
+        groupId: newChildGroupId,
+        parentIds: [],
+        allergies: [],
+        enrollmentStatus: 'active',
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      await loadStaticData();
+      Alert.alert('Enfant ajouté', `${firstName} ${lastName} a été inscrit(e).`);
+      setShowCreateChildModal(false);
+      setNewChildFirstName('');
+      setNewChildLastName('');
+      setNewChildGroupId('');
+      setNewChildDob('2023-06-15');
+    } catch (error) {
+      Alert.alert('Erreur', getCallableErrorMessage(error, "Impossible d'ajouter l'enfant."));
+    } finally {
+      setPending(false);
+    }
+  }
+
   async function handleCreateTenant() {
     if (!newTenantName.trim()) return Alert.alert('Erreur', 'Nom de crèche requis.');
     setPending(true);
@@ -259,7 +324,11 @@ export function AdminScreen({ tenantId, tenantIds, onTenantChange }: Props) {
           <TouchableOpacity style={styles.primaryButton} onPress={() => setShowCreateTenantModal(true)}>
             <Text style={styles.primaryButtonText}>+ Créer une nouvelle crèche</Text>
           </TouchableOpacity>
-          <Text style={styles.hint}>Invitez les membres via l’onglet Invitations, puis attribuez les rôles si nécessaire.</Text>
+          <Text style={styles.hint}>
+            1. Créez des groupes (onglet Groupes){'\n'}
+            2. Ajoutez des enfants (onglet Enfants){'\n'}
+            3. Invitez les parents (onglet Invitations)
+          </Text>
         </ScrollView>
       )}
 
@@ -307,28 +376,55 @@ export function AdminScreen({ tenantId, tenantIds, onTenantChange }: Props) {
       )}
 
       {tab === 'children' && (
-        <ScrollView style={styles.panel} contentContainerStyle={styles.listContent}>
-          {children.map((child) => {
-            const group = groups.find((g) => g.id === child.groupId);
-            return (
-              <View key={child.id} style={styles.listCard}>
-                <Text style={styles.listTitle}>{child.firstName} {child.lastName}</Text>
-                <Text style={styles.listMeta}>Groupe : {group?.name ?? child.groupId}</Text>
-              </View>
-            );
-          })}
-        </ScrollView>
+        <View style={styles.panel}>
+          <TouchableOpacity style={styles.primaryButton} onPress={() => setShowCreateChildModal(true)}>
+            <Text style={styles.primaryButtonText}>+ Ajouter un enfant</Text>
+          </TouchableOpacity>
+          <FlatList
+            data={children}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.listContent}
+            renderItem={({ item }) => {
+              const group = groups.find((g) => g.id === item.groupId);
+              return (
+                <View style={styles.listCard}>
+                  <Text style={styles.listTitle}>{item.firstName} {item.lastName}</Text>
+                  <Text style={styles.listMeta}>Groupe : {group?.name ?? item.groupId}</Text>
+                  <Text style={styles.listMeta}>
+                    Parents liés : {item.parentIds?.length ?? 0}
+                  </Text>
+                </View>
+              );
+            }}
+            ListEmptyComponent={
+              <Text style={styles.empty}>
+                Aucun enfant. Créez d&apos;abord un groupe, puis ajoutez un enfant.
+              </Text>
+            }
+          />
+        </View>
       )}
 
       {tab === 'groups' && (
-        <ScrollView style={styles.panel} contentContainerStyle={styles.listContent}>
-          {groups.map((group) => (
-            <View key={group.id} style={styles.listCard}>
-              <Text style={styles.listTitle}>{group.name}</Text>
-              <Text style={styles.listMeta}>Éducateurs : {group.educatorIds?.length ?? 0}</Text>
-            </View>
-          ))}
-        </ScrollView>
+        <View style={styles.panel}>
+          <TouchableOpacity style={styles.primaryButton} onPress={() => setShowCreateGroupModal(true)}>
+            <Text style={styles.primaryButtonText}>+ Créer un groupe</Text>
+          </TouchableOpacity>
+          <FlatList
+            data={groups}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.listContent}
+            renderItem={({ item }) => (
+              <View style={styles.listCard}>
+                <Text style={styles.listTitle}>{item.name}</Text>
+                <Text style={styles.listMeta}>Éducateurs : {item.educatorIds?.length ?? 0}</Text>
+              </View>
+            )}
+            ListEmptyComponent={
+              <Text style={styles.empty}>Aucun groupe. Créez par ex. « Bébés », « Moyens ».</Text>
+            }
+          />
+        </View>
       )}
 
       {tab === 'annonces' && <AnnouncementsScreen tenantId={tenantId} canSend />}
@@ -356,6 +452,39 @@ export function AdminScreen({ tenantId, tenantIds, onTenantChange }: Props) {
           {inviteRole === 'parent' && <View style={styles.chipRow}>{children.map((c) => <TouchableOpacity key={c.id} style={[styles.chip, inviteChildId === c.id && styles.chipActive]} onPress={() => setInviteChildId(c.id)}><Text style={[styles.chipText, inviteChildId === c.id && styles.chipTextActive]}>{c.firstName}</Text></TouchableOpacity>)}</View>}
           <TouchableOpacity style={[styles.primaryButton, pending && styles.buttonDisabled]} onPress={handleCreateInvitation} disabled={pending}><Text style={styles.primaryButtonText}>Créer invitation</Text></TouchableOpacity>
           <TouchableOpacity style={styles.cancelButton} onPress={() => setShowInviteModal(false)}><Text style={styles.cancelButtonText}>Annuler</Text></TouchableOpacity>
+        </View></ScrollView></View>
+      </Modal>
+
+      <Modal visible={showCreateGroupModal} animationType="slide" transparent>
+        <View style={styles.modalOverlay}><ScrollView contentContainerStyle={styles.modalScroll}><View style={styles.modalCard}>
+          <Text style={styles.modalTitle}>Créer un groupe</Text>
+          <TextInput style={styles.input} placeholder="Ex. Bébés, Moyens, Grands" value={newGroupName} onChangeText={setNewGroupName} />
+          <TouchableOpacity style={[styles.primaryButton, pending && styles.buttonDisabled]} onPress={handleCreateGroup} disabled={pending}><Text style={styles.primaryButtonText}>Créer</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.cancelButton} onPress={() => setShowCreateGroupModal(false)}><Text style={styles.cancelButtonText}>Annuler</Text></TouchableOpacity>
+        </View></ScrollView></View>
+      </Modal>
+
+      <Modal visible={showCreateChildModal} animationType="slide" transparent>
+        <View style={styles.modalOverlay}><ScrollView contentContainerStyle={styles.modalScroll}><View style={styles.modalCard}>
+          <Text style={styles.modalTitle}>Ajouter un enfant</Text>
+          <TextInput style={styles.input} placeholder="Prénom" value={newChildFirstName} onChangeText={setNewChildFirstName} />
+          <TextInput style={styles.input} placeholder="Nom" value={newChildLastName} onChangeText={setNewChildLastName} />
+          <Text style={styles.fieldLabel}>Date de naissance (AAAA-MM-JJ)</Text>
+          <TextInput style={styles.input} placeholder="2023-06-15" value={newChildDob} onChangeText={setNewChildDob} autoCapitalize="none" />
+          <Text style={styles.fieldLabel}>Groupe</Text>
+          {groups.length === 0 ? (
+            <Text style={styles.modalHint}>Créez d&apos;abord un groupe dans l&apos;onglet Groupes.</Text>
+          ) : (
+            <View style={styles.chipRow}>
+              {groups.map((g) => (
+                <TouchableOpacity key={g.id} style={[styles.chip, newChildGroupId === g.id && styles.chipActive]} onPress={() => setNewChildGroupId(g.id)}>
+                  <Text style={[styles.chipText, newChildGroupId === g.id && styles.chipTextActive]}>{g.name}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+          <TouchableOpacity style={[styles.primaryButton, pending && styles.buttonDisabled]} onPress={handleCreateChild} disabled={pending || groups.length === 0}><Text style={styles.primaryButtonText}>Ajouter</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.cancelButton} onPress={() => setShowCreateChildModal(false)}><Text style={styles.cancelButtonText}>Annuler</Text></TouchableOpacity>
         </View></ScrollView></View>
       </Modal>
 

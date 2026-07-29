@@ -8,6 +8,7 @@ import {
   StyleSheet,
   Alert,
   Switch,
+  ActivityIndicator,
 } from 'react-native';
 import {
   collection,
@@ -17,6 +18,7 @@ import {
   addDoc,
   doc,
   setDoc,
+  getDoc,
   serverTimestamp,
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
@@ -40,6 +42,8 @@ export function AnnouncementsScreen({
   canSend = false,
 }: Props) {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [ackedIds, setAckedIds] = useState<Set<string>>(new Set());
+  const [ackLoadingId, setAckLoadingId] = useState<string | null>(null);
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [requiresAck, setRequiresAck] = useState(false);
@@ -47,8 +51,6 @@ export function AnnouncementsScreen({
   const [showForm, setShowForm] = useState(false);
 
   useEffect(() => {
-    // Les parents et le staff voient toutes les annonces du tenant
-    // (globales + éventuelles annonces de groupe).
     const q = query(
       collection(db, paths.announcements(tenantId)),
       orderBy('createdAt', 'desc')
@@ -62,6 +64,35 @@ export function AnnouncementsScreen({
 
     return unsubscribe;
   }, [tenantId]);
+
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid || canSend) {
+      setAckedIds(new Set());
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadAcks() {
+      const acked = new Set<string>();
+      const needingAck = announcements.filter((a) => a.requiresAck);
+      await Promise.all(
+        needingAck.map(async (item) => {
+          const snap = await getDoc(
+            doc(db, paths.announcementAcks(tenantId, item.id), uid!)
+          );
+          if (snap.exists()) acked.add(item.id);
+        })
+      );
+      if (!cancelled) setAckedIds(acked);
+    }
+
+    loadAcks().catch(console.error);
+    return () => {
+      cancelled = true;
+    };
+  }, [announcements, tenantId, canSend]);
 
   async function sendAnnouncement() {
     const user = auth.currentUser;
@@ -101,13 +132,29 @@ export function AnnouncementsScreen({
 
   async function acknowledgeAnnouncement(msgId: string) {
     const uid = auth.currentUser?.uid;
-    if (!uid) return;
+    if (!uid) {
+      Alert.alert('Erreur', 'Vous devez être connecté.');
+      return;
+    }
+    if (ackedIds.has(msgId)) return;
 
-    await setDoc(doc(db, paths.announcementAcks(tenantId, msgId), uid), {
-      parentId: uid,
-      acknowledgedAt: serverTimestamp(),
-    });
-    Alert.alert('Confirmé', 'Accusé de réception enregistré.');
+    setAckLoadingId(msgId);
+    try {
+      await setDoc(doc(db, paths.announcementAcks(tenantId, msgId), uid), {
+        parentId: uid,
+        acknowledgedAt: serverTimestamp(),
+      });
+      setAckedIds((prev) => new Set(prev).add(msgId));
+      Alert.alert('Confirmé', 'Accusé de réception enregistré.');
+    } catch (error) {
+      Alert.alert(
+        'Erreur',
+        "Impossible d'enregistrer l'accusé de réception. Vérifiez votre connexion ou contactez la crèche."
+      );
+      console.error(error);
+    } finally {
+      setAckLoadingId(null);
+    }
   }
 
   return (
@@ -211,12 +258,24 @@ export function AnnouncementsScreen({
               {item.senderName} — {formatFirestoreDate(item.createdAt)}
             </Text>
             {item.requiresAck && !canSend && (
-              <TouchableOpacity
-                style={styles.ackButton}
-                onPress={() => acknowledgeAnnouncement(item.id)}
-              >
-                <Text style={styles.ackButtonText}>Accuser réception</Text>
-              </TouchableOpacity>
+              ackedIds.has(item.id) ? (
+                <Text style={styles.ackDone}>✓ Réception accusée</Text>
+              ) : (
+                <TouchableOpacity
+                  style={[
+                    styles.ackButton,
+                    ackLoadingId === item.id && styles.ackButtonDisabled,
+                  ]}
+                  onPress={() => acknowledgeAnnouncement(item.id)}
+                  disabled={ackLoadingId === item.id}
+                >
+                  {ackLoadingId === item.id ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Text style={styles.ackButtonText}>Accuser réception</Text>
+                  )}
+                </TouchableOpacity>
+              )
             )}
           </View>
         )}
@@ -338,7 +397,20 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 10,
     alignItems: 'center',
+    minHeight: 40,
+    justifyContent: 'center',
   },
+  ackButtonDisabled: { opacity: 0.7 },
   ackButtonText: { color: '#fff', fontWeight: '600', fontSize: 13 },
+  ackDone: {
+    marginTop: 10,
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#27ae60',
+    textAlign: 'center',
+    padding: 10,
+    backgroundColor: '#eafaf1',
+    borderRadius: 8,
+  },
   empty: { textAlign: 'center', color: '#999', marginTop: 40, fontSize: 14 },
 });

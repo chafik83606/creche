@@ -9,6 +9,7 @@ import {
   addDoc,
   setDoc,
   doc,
+  getDoc,
   serverTimestamp,
 } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
@@ -22,6 +23,8 @@ interface Props {
 
 export function AnnouncementsPanel({ tenantId, canSend = false }: Props) {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [ackedIds, setAckedIds] = useState<Set<string>>(new Set());
+  const [ackLoadingId, setAckLoadingId] = useState<string | null>(null);
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [requiresAck, setRequiresAck] = useState(false);
@@ -44,35 +47,82 @@ export function AnnouncementsPanel({ tenantId, canSend = false }: Props) {
     );
   }, [tenantId]);
 
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid || canSend) {
+      setAckedIds(new Set());
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadAcks() {
+      const acked = new Set<string>();
+      const needingAck = announcements.filter((a) => a.requiresAck);
+      await Promise.all(
+        needingAck.map(async (item) => {
+          const snap = await getDoc(
+            doc(db, paths.announcementAcks(tenantId, item.id), uid!)
+          );
+          if (snap.exists()) acked.add(item.id);
+        })
+      );
+      if (!cancelled) setAckedIds(acked);
+    }
+
+    loadAcks().catch(console.error);
+    return () => {
+      cancelled = true;
+    };
+  }, [announcements, tenantId, canSend]);
+
   async function sendAnnouncement() {
     const user = auth.currentUser;
     if (!user || !title.trim() || !body.trim()) return;
 
-    await addDoc(collection(db, paths.announcements(tenantId)), {
-      type: 'announcement',
-      title: title.trim(),
-      body: body.trim(),
-      senderId: user.uid,
-      senderName: user.displayName ?? user.email,
-      groupId: null,
-      requiresAck,
-      createdAt: serverTimestamp(),
-    });
+    try {
+      await addDoc(collection(db, paths.announcements(tenantId)), {
+        type: 'announcement',
+        title: title.trim(),
+        body: body.trim(),
+        senderId: user.uid,
+        senderName: user.displayName ?? user.email,
+        groupId: null,
+        requiresAck,
+        createdAt: serverTimestamp(),
+      });
 
-    setTitle('');
-    setBody('');
-    setRequiresAck(false);
-    setShowForm(false);
+      setTitle('');
+      setBody('');
+      setRequiresAck(false);
+      setShowForm(false);
+    } catch (error) {
+      console.error(error);
+      alert("Impossible d'envoyer le message.");
+    }
   }
 
   async function acknowledge(msgId: string) {
     const uid = auth.currentUser?.uid;
-    if (!uid) return;
+    if (!uid) {
+      alert('Vous devez être connecté.');
+      return;
+    }
+    if (ackedIds.has(msgId)) return;
 
-    await setDoc(doc(db, paths.announcementAcks(tenantId, msgId), uid), {
-      parentId: uid,
-      acknowledgedAt: serverTimestamp(),
-    });
+    setAckLoadingId(msgId);
+    try {
+      await setDoc(doc(db, paths.announcementAcks(tenantId, msgId), uid), {
+        parentId: uid,
+        acknowledgedAt: serverTimestamp(),
+      });
+      setAckedIds((prev) => new Set(prev).add(msgId));
+    } catch (error) {
+      console.error(error);
+      alert("Impossible d'enregistrer l'accusé de réception.");
+    } finally {
+      setAckLoadingId(null);
+    }
   }
 
   return (
@@ -129,12 +179,19 @@ export function AnnouncementsPanel({ tenantId, canSend = false }: Props) {
               {item.senderName} — {formatFirestoreDate(item.createdAt)}
             </p>
             {item.requiresAck && !canSend && (
-              <button
-                onClick={() => acknowledge(item.id)}
-                className="mt-3 px-4 py-1.5 bg-amber-500 text-white rounded-lg text-sm font-medium hover:bg-amber-600"
-              >
-                Accuser réception
-              </button>
+              ackedIds.has(item.id) ? (
+                <p className="mt-3 text-sm font-medium text-green-700 bg-green-50 rounded-lg px-4 py-2 text-center">
+                  ✓ Réception accusée
+                </p>
+              ) : (
+                <button
+                  onClick={() => acknowledge(item.id)}
+                  disabled={ackLoadingId === item.id}
+                  className="mt-3 px-4 py-1.5 bg-amber-500 text-white rounded-lg text-sm font-medium hover:bg-amber-600 disabled:opacity-70"
+                >
+                  {ackLoadingId === item.id ? 'Enregistrement…' : 'Accuser réception'}
+                </button>
+              )
             )}
           </div>
         ))}

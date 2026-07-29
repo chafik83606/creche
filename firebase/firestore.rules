@@ -124,7 +124,7 @@ service cloud.firestore {
 
         match /acks/{parentId} {
           allow read: if isMemberOf(tenantId);
-          allow create: if isParent()
+          allow create, update: if isParent()
             && isMemberOf(tenantId)
             && parentId == request.auth.uid;
         }
