@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Creche Connect",
+    "name": "Zibou",
     "slug": "creche",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -10,25 +10,26 @@
     "splash": {
       "image": "./assets/icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#4a90d9"
+      "backgroundColor": "#ffffff"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#4a90d9",
+        "backgroundColor": "#ffffff",
         "foregroundImage": "./assets/android-icon-foreground.png"
       },
       "package": "fr.creche.app",
-      "versionCode": 10,
+      "versionCode": 11,
       "googleServicesFile": "./google-services.json",
       "softwareKeyboardLayoutMode": "resize"
     },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "fr.creche.app",
-      "buildNumber": "10",
+      "buildNumber": "11",
       "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSMicrophoneUsageDescription": "Zibou a besoin du micro pour envoyer des messages audio."
       }
     },
     "web": {
@@ -39,14 +40,20 @@
         "expo-notifications",
         {
           "icon": "./assets/icon.png",
-          "color": "#4a90d9"
+          "color": "#E91E8C"
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "Autoriser Creche Connect à accéder à vos photos pour les partager dans le chat.",
-          "cameraPermission": "Autoriser Creche Connect à utiliser la caméra pour le chat."
+          "photosPermission": "Autoriser Zibou à accéder à vos photos pour les partager dans le chat.",
+          "cameraPermission": "Autoriser Zibou à utiliser la caméra pour le chat."
+        }
+      ],
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Autoriser Zibou à utiliser le micro pour les messages audio."
         }
       ],
       "./plugins/withAndroidSigning.js",

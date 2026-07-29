@@ -152,9 +152,9 @@ export interface PrivateMessage {
   recipientId: string;
   childId: string;
   body: string;
-  /** URL Firebase Storage si pièce jointe image/vidéo */
+  /** URL Firebase Storage si pièce jointe */
   mediaUrl?: string;
-  mediaType?: 'image' | 'video';
+  mediaType?: 'image' | 'video' | 'audio';
   readAt?: Date;
   createdAt: Date;
 }

@@ -534,7 +534,7 @@ export function HomeScreen() {
   return (
     <View style={styles.flex}>
       <View style={[styles.header, { paddingTop: Math.max(insets.top, 12) + 12 }]}>
-        <Text style={styles.headerTitle}>Creche</Text>
+        <Text style={styles.headerTitle}>Zibou</Text>
         <TouchableOpacity onPress={() => signOut(auth)}>
           <Text style={styles.logout}>Deconnexion</Text>
         </TouchableOpacity>

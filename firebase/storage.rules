@@ -41,7 +41,7 @@ service firebase.storage {
         && request.resource.contentType.matches('image/.*');
     }
 
-    // Pièces jointes messages privés
+    // Pièces jointes messages privés (image, vidéo, audio)
     match /tenants/{tenantId}/chat/{childId}/{fileName} {
       allow read: if hasTenantAccess(tenantId);
       allow write: if hasTenantAccess(tenantId)
@@ -49,6 +49,7 @@ service firebase.storage {
         && (
           request.resource.contentType.matches('image/.*')
           || request.resource.contentType.matches('video/.*')
+          || request.resource.contentType.matches('audio/.*')
         );
     }
   }

@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
+import { Audio } from 'expo-av';
 import {
   collection,
   query,
@@ -38,6 +39,76 @@ interface Props {
   recipientName: string;
 }
 
+function AudioMessagePlayer({
+  url,
+  isMine,
+}: {
+  url: string;
+  isMine: boolean;
+}) {
+  const [playing, setPlaying] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const soundRef = useRef<Audio.Sound | null>(null);
+
+  useEffect(() => {
+    return () => {
+      soundRef.current?.unloadAsync().catch(() => undefined);
+    };
+  }, []);
+
+  async function toggle() {
+    try {
+      if (playing && soundRef.current) {
+        await soundRef.current.stopAsync();
+        await soundRef.current.unloadAsync();
+        soundRef.current = null;
+        setPlaying(false);
+        return;
+      }
+
+      setLoading(true);
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+      });
+      const { sound } = await Audio.Sound.createAsync(
+        { uri: url },
+        { shouldPlay: true }
+      );
+      soundRef.current = sound;
+      setPlaying(true);
+      sound.setOnPlaybackStatusUpdate((status) => {
+        if (!status.isLoaded) return;
+        if (status.didJustFinish) {
+          setPlaying(false);
+          sound.unloadAsync().catch(() => undefined);
+          soundRef.current = null;
+        }
+      });
+    } catch (err) {
+      console.error(err);
+      Alert.alert('Erreur', 'Impossible de lire ce message audio.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <TouchableOpacity style={styles.audioRow} onPress={toggle} disabled={loading}>
+      {loading ? (
+        <ActivityIndicator size="small" color={isMine ? '#fff' : '#4a90d9'} />
+      ) : (
+        <Text style={[styles.audioIcon, isMine && styles.bubbleTextMine]}>
+          {playing ? '⏹' : '▶'}
+        </Text>
+      )}
+      <Text style={[styles.audioLabel, isMine && styles.bubbleTextMine]}>
+        Message audio
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
 export function PrivateChatScreen({
   tenantId,
   childId,
@@ -47,7 +118,10 @@ export function PrivateChatScreen({
   const [messages, setMessages] = useState<PrivateMessage[]>([]);
   const [text, setText] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [recording, setRecording] = useState<Audio.Recording | null>(null);
+  const [recordingMs, setRecordingMs] = useState(0);
   const listRef = useRef<FlatList>(null);
+  const recordTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const insets = useSafeAreaInsets();
   const uid = auth.currentUser?.uid;
 
@@ -109,9 +183,16 @@ export function PrivateChatScreen({
     return () => clearTimeout(t);
   }, [messages.length]);
 
+  useEffect(() => {
+    return () => {
+      if (recordTimer.current) clearInterval(recordTimer.current);
+      recording?.stopAndUnloadAsync().catch(() => undefined);
+    };
+  }, [recording]);
+
   async function sendMessage(extra?: {
     mediaUrl?: string;
-    mediaType?: 'image' | 'video';
+    mediaType?: 'image' | 'video' | 'audio';
     body?: string;
   }) {
     const user = auth.currentUser;
@@ -119,13 +200,20 @@ export function PrivateChatScreen({
     if (!user) return;
     if (!body && !extra?.mediaUrl) return;
 
+    const fallbackLabel =
+      extra?.mediaType === 'video'
+        ? 'Vidéo'
+        : extra?.mediaType === 'audio'
+          ? 'Message audio'
+          : 'Image';
+
     await addDoc(collection(db, paths.privateMessages(tenantId)), {
       type: 'private',
       senderId: user.uid,
       senderName: user.displayName ?? user.email,
       recipientId,
       childId,
-      body: body || (extra?.mediaType === 'video' ? 'Vidéo' : 'Image'),
+      body: body || fallbackLabel,
       ...(extra?.mediaUrl
         ? { mediaUrl: extra.mediaUrl, mediaType: extra.mediaType ?? 'image' }
         : {}),
@@ -133,6 +221,41 @@ export function PrivateChatScreen({
     });
 
     if (!extra?.mediaUrl) setText('');
+  }
+
+  async function uploadUri(
+    uri: string,
+    mediaType: 'image' | 'video' | 'audio',
+    mimeType: string,
+    ext: string
+  ) {
+    const user = auth.currentUser;
+    if (!user) return;
+
+    setUploading(true);
+    try {
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      const fileName = `${user.uid}_${Date.now()}.${ext}`;
+      const storagePath = `tenants/${tenantId}/chat/${childId}/${fileName}`;
+      const storageRef = ref(storage, storagePath);
+      await uploadBytes(storageRef, blob, { contentType: mimeType });
+      const mediaUrl = await getDownloadURL(storageRef);
+      await sendMessage({
+        mediaUrl,
+        mediaType,
+        body: text.trim(),
+      });
+      setText('');
+    } catch (err) {
+      console.error(err);
+      Alert.alert(
+        'Erreur',
+        'Impossible d’envoyer le fichier. Vérifiez la connexion puis réessayez.'
+      );
+    } finally {
+      setUploading(false);
+    }
   }
 
   async function pickAndSendMedia(mediaTypes: ImagePicker.MediaType | ImagePicker.MediaType[]) {
@@ -155,55 +278,82 @@ export function PrivateChatScreen({
 
     const asset = result.assets[0];
     const isVideo = asset.type === 'video' || (asset.mimeType ?? '').startsWith('video/');
-    const user = auth.currentUser;
-    if (!user) return;
+    const ext =
+      asset.fileName?.split('.').pop() ||
+      (isVideo ? 'mp4' : asset.uri.split('.').pop()?.split('?')[0] || 'jpg');
 
-    setUploading(true);
+    await uploadUri(
+      asset.uri,
+      isVideo ? 'video' : 'image',
+      asset.mimeType ?? (isVideo ? 'video/mp4' : 'image/jpeg'),
+      ext
+    );
+  }
+
+  async function startRecording() {
     try {
-      const response = await fetch(asset.uri);
-      const blob = await response.blob();
-      const ext =
-        asset.fileName?.split('.').pop() ||
-        (isVideo ? 'mp4' : asset.uri.split('.').pop()?.split('?')[0] || 'jpg');
-      const fileName = `${user.uid}_${Date.now()}.${ext}`;
-      const storagePath = `tenants/${tenantId}/chat/${childId}/${fileName}`;
-      const storageRef = ref(storage, storagePath);
-      await uploadBytes(storageRef, blob, {
-        contentType: asset.mimeType ?? (isVideo ? 'video/mp4' : 'image/jpeg'),
+      const permission = await Audio.requestPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Permission requise', 'Autorisez le micro pour envoyer un message audio.');
+        return;
+      }
+
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
       });
-      const mediaUrl = await getDownloadURL(storageRef);
-      await sendMessage({
-        mediaUrl,
-        mediaType: isVideo ? 'video' : 'image',
-        body: text.trim(),
-      });
-      setText('');
+
+      const { recording: rec } = await Audio.Recording.createAsync(
+        Audio.RecordingOptionsPresets.HIGH_QUALITY
+      );
+      setRecording(rec);
+      setRecordingMs(0);
+      recordTimer.current = setInterval(() => {
+        setRecordingMs((ms) => ms + 1000);
+      }, 1000);
     } catch (err) {
       console.error(err);
-      Alert.alert(
-        'Erreur',
-        'Impossible d’envoyer le fichier. Vérifiez que Firebase Storage est activé, puis réessayez.'
-      );
-    } finally {
-      setUploading(false);
+      Alert.alert('Erreur', 'Impossible de démarrer l’enregistrement.');
+    }
+  }
+
+  async function stopRecording(send: boolean) {
+    if (!recording) return;
+
+    if (recordTimer.current) {
+      clearInterval(recordTimer.current);
+      recordTimer.current = null;
+    }
+
+    try {
+      await recording.stopAndUnloadAsync();
+      await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
+      const uri = recording.getURI();
+      setRecording(null);
+      setRecordingMs(0);
+
+      if (send && uri) {
+        await uploadUri(uri, 'audio', 'audio/m4a', 'm4a');
+      }
+    } catch (err) {
+      console.error(err);
+      setRecording(null);
+      Alert.alert('Erreur', 'Impossible de finaliser l’audio.');
     }
   }
 
   function openMediaMenu() {
     Alert.alert('Joindre', 'Que souhaitez-vous envoyer ?', [
-      {
-        text: 'Image',
-        onPress: () => pickAndSendMedia(['images']),
-      },
-      {
-        text: 'Vidéo',
-        onPress: () => pickAndSendMedia(['videos']),
-      },
+      { text: 'Image', onPress: () => pickAndSendMedia(['images']) },
+      { text: 'Vidéo', onPress: () => pickAndSendMedia(['videos']) },
       { text: 'Annuler', style: 'cancel' },
     ]);
   }
 
   const bottomPad = Math.max(insets.bottom, Platform.OS === 'android' ? 12 : 8);
+  const recordLabel = `${Math.floor(recordingMs / 60000)}:${String(
+    Math.floor((recordingMs % 60000) / 1000)
+  ).padStart(2, '0')}`;
 
   return (
     <KeyboardAvoidingView
@@ -224,6 +374,9 @@ export function PrivateChatScreen({
         onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
         renderItem={({ item }) => {
           const isMine = item.senderId === uid;
+          const isDefaultMediaLabel =
+            item.body === 'Image' || item.body === 'Vidéo' || item.body === 'Message audio';
+
           return (
             <View style={[styles.bubble, isMine ? styles.bubbleMine : styles.bubbleOther]}>
               {item.mediaUrl && item.mediaType === 'image' ? (
@@ -236,7 +389,10 @@ export function PrivateChatScreen({
                   </Text>
                 </TouchableOpacity>
               ) : null}
-              {!!item.body && !(item.mediaUrl && (item.body === 'Image' || item.body === 'Vidéo')) ? (
+              {item.mediaUrl && item.mediaType === 'audio' ? (
+                <AudioMessagePlayer url={item.mediaUrl} isMine={!!isMine} />
+              ) : null}
+              {!!item.body && !isDefaultMediaLabel ? (
                 <Text style={[styles.bubbleText, isMine && styles.bubbleTextMine]}>
                   {item.body}
                 </Text>
@@ -249,35 +405,56 @@ export function PrivateChatScreen({
         }}
       />
 
-      <View style={[styles.inputRow, { paddingBottom: bottomPad }]}>
-        <TouchableOpacity
-          style={styles.attachButton}
-          onPress={openMediaMenu}
-          disabled={uploading}
-          accessibilityLabel="Joindre une image ou une vidéo"
-        >
-          {uploading ? (
-            <ActivityIndicator size="small" color="#4a90d9" />
-          ) : (
-            <Text style={styles.attachButtonText}>＋</Text>
-          )}
-        </TouchableOpacity>
-        <TextInput
-          style={styles.textInput}
-          placeholder="Votre message..."
-          value={text}
-          onChangeText={setText}
-          multiline
-          editable={!uploading}
-        />
-        <TouchableOpacity
-          style={[styles.sendButton, uploading && styles.sendButtonDisabled]}
-          onPress={() => sendMessage()}
-          disabled={uploading}
-        >
-          <Text style={styles.sendButtonText}>Envoyer</Text>
-        </TouchableOpacity>
-      </View>
+      {recording ? (
+        <View style={[styles.recordingBar, { paddingBottom: bottomPad }]}>
+          <Text style={styles.recordingDot}>●</Text>
+          <Text style={styles.recordingText}>Enregistrement {recordLabel}</Text>
+          <TouchableOpacity style={styles.recCancel} onPress={() => stopRecording(false)}>
+            <Text style={styles.recCancelText}>Annuler</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.recSend} onPress={() => stopRecording(true)}>
+            <Text style={styles.sendButtonText}>Envoyer</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <View style={[styles.inputRow, { paddingBottom: bottomPad }]}>
+          <TouchableOpacity
+            style={styles.attachButton}
+            onPress={openMediaMenu}
+            disabled={uploading}
+            accessibilityLabel="Joindre une image ou une vidéo"
+          >
+            {uploading ? (
+              <ActivityIndicator size="small" color="#4a90d9" />
+            ) : (
+              <Text style={styles.attachButtonText}>＋</Text>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.attachButton}
+            onPress={startRecording}
+            disabled={uploading}
+            accessibilityLabel="Enregistrer un message audio"
+          >
+            <Text style={styles.micButtonText}>🎤</Text>
+          </TouchableOpacity>
+          <TextInput
+            style={styles.textInput}
+            placeholder="Votre message..."
+            value={text}
+            onChangeText={setText}
+            multiline
+            editable={!uploading}
+          />
+          <TouchableOpacity
+            style={[styles.sendButton, uploading && styles.sendButtonDisabled]}
+            onPress={() => sendMessage()}
+            disabled={uploading}
+          >
+            <Text style={styles.sendButtonText}>Envoyer</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </KeyboardAvoidingView>
   );
 }
@@ -329,6 +506,9 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     textDecorationLine: 'underline',
   },
+  audioRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
+  audioIcon: { fontSize: 16, color: '#1a1a2e' },
+  audioLabel: { fontSize: 14, fontWeight: '600', color: '#1a1a2e' },
   inputRow: {
     flexDirection: 'row',
     paddingHorizontal: 10,
@@ -338,6 +518,26 @@ const styles = StyleSheet.create({
     borderTopColor: '#e0e0e0',
     alignItems: 'flex-end',
   },
+  recordingBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    backgroundColor: '#fff5f5',
+    borderTopWidth: 1,
+    borderTopColor: '#ffd0d0',
+    gap: 8,
+  },
+  recordingDot: { color: '#e53935', fontSize: 14 },
+  recordingText: { flex: 1, color: '#c62828', fontWeight: '600' },
+  recCancel: { paddingHorizontal: 10, paddingVertical: 8 },
+  recCancelText: { color: '#666', fontWeight: '600' },
+  recSend: {
+    backgroundColor: '#4a90d9',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
   attachButton: {
     width: 40,
     height: 40,
@@ -345,10 +545,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#eef4fb',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 8,
+    marginRight: 6,
     marginBottom: 2,
   },
   attachButtonText: { fontSize: 22, color: '#4a90d9', fontWeight: '600', lineHeight: 24 },
+  micButtonText: { fontSize: 16 },
   textInput: {
     flex: 1,
     borderWidth: 1,

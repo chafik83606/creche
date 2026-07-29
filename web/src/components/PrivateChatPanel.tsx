@@ -146,7 +146,13 @@ export function PrivateChatPanel({
                     ▶ Voir la vidéo
                   </a>
                 ) : null}
-                {msg.body && msg.body !== 'Image' && msg.body !== 'Vidéo' ? (
+                {msg.mediaUrl && msg.mediaType === 'audio' ? (
+                  <audio controls src={msg.mediaUrl} className="mb-2 max-w-full" />
+                ) : null}
+                {msg.body &&
+                msg.body !== 'Image' &&
+                msg.body !== 'Vidéo' &&
+                msg.body !== 'Message audio' ? (
                   <p className="text-sm leading-relaxed">{msg.body}</p>
                 ) : null}
                 <p className={`text-[10px] mt-1 ${isMine ? 'text-blue-200' : 'text-gray-400'}`}>
