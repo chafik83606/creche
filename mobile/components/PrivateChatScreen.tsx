@@ -15,7 +15,14 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
-import { Audio } from 'expo-av';
+import {
+  RecordingPresets,
+  requestRecordingPermissionsAsync,
+  setAudioModeAsync,
+  useAudioPlayer,
+  useAudioRecorder,
+  useAudioRecorderState,
+} from 'expo-audio';
 import {
   collection,
   query,
@@ -46,66 +53,172 @@ function AudioMessagePlayer({
   url: string;
   isMine: boolean;
 }) {
+  const player = useAudioPlayer(url);
   const [playing, setPlaying] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const soundRef = useRef<Audio.Sound | null>(null);
 
-  useEffect(() => {
-    return () => {
-      soundRef.current?.unloadAsync().catch(() => undefined);
-    };
-  }, []);
-
-  async function toggle() {
+  function toggle() {
     try {
-      if (playing && soundRef.current) {
-        await soundRef.current.stopAsync();
-        await soundRef.current.unloadAsync();
-        soundRef.current = null;
+      if (playing) {
+        player.pause();
         setPlaying(false);
         return;
       }
-
-      setLoading(true);
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        playsInSilentModeIOS: true,
-      });
-      const { sound } = await Audio.Sound.createAsync(
-        { uri: url },
-        { shouldPlay: true }
-      );
-      soundRef.current = sound;
+      player.play();
       setPlaying(true);
-      sound.setOnPlaybackStatusUpdate((status) => {
-        if (!status.isLoaded) return;
-        if (status.didJustFinish) {
-          setPlaying(false);
-          sound.unloadAsync().catch(() => undefined);
-          soundRef.current = null;
-        }
-      });
     } catch (err) {
       console.error(err);
       Alert.alert('Erreur', 'Impossible de lire ce message audio.');
-    } finally {
-      setLoading(false);
     }
   }
 
   return (
-    <TouchableOpacity style={styles.audioRow} onPress={toggle} disabled={loading}>
-      {loading ? (
-        <ActivityIndicator size="small" color={isMine ? '#fff' : '#4a90d9'} />
-      ) : (
-        <Text style={[styles.audioIcon, isMine && styles.bubbleTextMine]}>
-          {playing ? '⏹' : '▶'}
-        </Text>
-      )}
+    <TouchableOpacity style={styles.audioRow} onPress={toggle}>
+      <Text style={[styles.audioIcon, isMine && styles.bubbleTextMine]}>
+        {playing ? '⏹' : '▶'}
+      </Text>
       <Text style={[styles.audioLabel, isMine && styles.bubbleTextMine]}>
         Message audio
       </Text>
     </TouchableOpacity>
+  );
+}
+
+function ChatComposer({
+  uploading,
+  text,
+  setText,
+  onSendText,
+  onOpenMedia,
+  onUploadUri,
+  bottomPad,
+}: {
+  uploading: boolean;
+  text: string;
+  setText: (v: string) => void;
+  onSendText: () => void;
+  onOpenMedia: () => void;
+  onUploadUri: (
+    uri: string,
+    mediaType: 'image' | 'video' | 'audio',
+    mimeType: string,
+    ext: string
+  ) => Promise<void>;
+  bottomPad: number;
+}) {
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const recorderState = useAudioRecorderState(recorder);
+  const [recordingMs, setRecordingMs] = useState(0);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (recorderState.isRecording) {
+      if (!timerRef.current) {
+        timerRef.current = setInterval(() => setRecordingMs((ms) => ms + 1000), 1000);
+      }
+    } else if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  }, [recorderState.isRecording]);
+
+  async function startRecording() {
+    try {
+      const permission = await AudioModule.requestRecordingPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Permission requise', 'Autorisez le micro pour envoyer un message audio.');
+        return;
+      }
+      await setAudioModeAsync({
+        allowsRecording: true,
+        playsInSilentMode: true,
+      });
+      setRecordingMs(0);
+      await recorder.prepareToRecordAsync();
+      recorder.record();
+    } catch (err) {
+      console.error(err);
+      Alert.alert('Erreur', 'Impossible de démarrer l’enregistrement.');
+    }
+  }
+
+  async function stopRecording(send: boolean) {
+    try {
+      await recorder.stop();
+      await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
+      const uri = recorder.uri;
+      setRecordingMs(0);
+      if (send && uri) {
+        await onUploadUri(uri, 'audio', 'audio/m4a', 'm4a');
+      }
+    } catch (err) {
+      console.error(err);
+      Alert.alert('Erreur', 'Impossible de finaliser l’audio.');
+    }
+  }
+
+  const recordLabel = `${Math.floor(recordingMs / 60000)}:${String(
+    Math.floor((recordingMs % 60000) / 1000)
+  ).padStart(2, '0')}`;
+
+  if (recorderState.isRecording) {
+    return (
+      <View style={[styles.recordingBar, { paddingBottom: bottomPad }]}>
+        <Text style={styles.recordingDot}>●</Text>
+        <Text style={styles.recordingText}>Enregistrement {recordLabel}</Text>
+        <TouchableOpacity style={styles.recCancel} onPress={() => stopRecording(false)}>
+          <Text style={styles.recCancelText}>Annuler</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.recSend} onPress={() => stopRecording(true)}>
+          <Text style={styles.sendButtonText}>Envoyer</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  return (
+    <View style={[styles.inputRow, { paddingBottom: bottomPad }]}>
+      <TouchableOpacity
+        style={styles.attachButton}
+        onPress={onOpenMedia}
+        disabled={uploading}
+        accessibilityLabel="Joindre une image ou une vidéo"
+      >
+        {uploading ? (
+          <ActivityIndicator size="small" color="#4a90d9" />
+        ) : (
+          <Text style={styles.attachButtonText}>＋</Text>
+        )}
+      </TouchableOpacity>
+      <TouchableOpacity
+        style={styles.attachButton}
+        onPress={startRecording}
+        disabled={uploading}
+        accessibilityLabel="Enregistrer un message audio"
+      >
+        <Text style={styles.micButtonText}>🎤</Text>
+      </TouchableOpacity>
+      <TextInput
+        style={styles.textInput}
+        placeholder="Votre message..."
+        value={text}
+        onChangeText={setText}
+        multiline
+        editable={!uploading}
+      />
+      <TouchableOpacity
+        style={[styles.sendButton, uploading && styles.sendButtonDisabled]}
+        onPress={onSendText}
+        disabled={uploading}
+      >
+        <Text style={styles.sendButtonText}>Envoyer</Text>
+      </TouchableOpacity>
+    </View>
   );
 }
 
@@ -118,10 +231,7 @@ export function PrivateChatScreen({
   const [messages, setMessages] = useState<PrivateMessage[]>([]);
   const [text, setText] = useState('');
   const [uploading, setUploading] = useState(false);
-  const [recording, setRecording] = useState<Audio.Recording | null>(null);
-  const [recordingMs, setRecordingMs] = useState(0);
   const listRef = useRef<FlatList>(null);
-  const recordTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const insets = useSafeAreaInsets();
   const uid = auth.currentUser?.uid;
 
@@ -182,13 +292,6 @@ export function PrivateChatScreen({
     }, 100);
     return () => clearTimeout(t);
   }, [messages.length]);
-
-  useEffect(() => {
-    return () => {
-      if (recordTimer.current) clearInterval(recordTimer.current);
-      recording?.stopAndUnloadAsync().catch(() => undefined);
-    };
-  }, [recording]);
 
   async function sendMessage(extra?: {
     mediaUrl?: string;
@@ -290,58 +393,6 @@ export function PrivateChatScreen({
     );
   }
 
-  async function startRecording() {
-    try {
-      const permission = await Audio.requestPermissionsAsync();
-      if (!permission.granted) {
-        Alert.alert('Permission requise', 'Autorisez le micro pour envoyer un message audio.');
-        return;
-      }
-
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-      });
-
-      const { recording: rec } = await Audio.Recording.createAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY
-      );
-      setRecording(rec);
-      setRecordingMs(0);
-      recordTimer.current = setInterval(() => {
-        setRecordingMs((ms) => ms + 1000);
-      }, 1000);
-    } catch (err) {
-      console.error(err);
-      Alert.alert('Erreur', 'Impossible de démarrer l’enregistrement.');
-    }
-  }
-
-  async function stopRecording(send: boolean) {
-    if (!recording) return;
-
-    if (recordTimer.current) {
-      clearInterval(recordTimer.current);
-      recordTimer.current = null;
-    }
-
-    try {
-      await recording.stopAndUnloadAsync();
-      await Audio.setAudioModeAsync({ allowsRecordingIOS: false });
-      const uri = recording.getURI();
-      setRecording(null);
-      setRecordingMs(0);
-
-      if (send && uri) {
-        await uploadUri(uri, 'audio', 'audio/m4a', 'm4a');
-      }
-    } catch (err) {
-      console.error(err);
-      setRecording(null);
-      Alert.alert('Erreur', 'Impossible de finaliser l’audio.');
-    }
-  }
-
   function openMediaMenu() {
     Alert.alert('Joindre', 'Que souhaitez-vous envoyer ?', [
       { text: 'Image', onPress: () => pickAndSendMedia(['images']) },
@@ -351,9 +402,6 @@ export function PrivateChatScreen({
   }
 
   const bottomPad = Math.max(insets.bottom, Platform.OS === 'android' ? 12 : 8);
-  const recordLabel = `${Math.floor(recordingMs / 60000)}:${String(
-    Math.floor((recordingMs % 60000) / 1000)
-  ).padStart(2, '0')}`;
 
   return (
     <KeyboardAvoidingView
@@ -405,56 +453,15 @@ export function PrivateChatScreen({
         }}
       />
 
-      {recording ? (
-        <View style={[styles.recordingBar, { paddingBottom: bottomPad }]}>
-          <Text style={styles.recordingDot}>●</Text>
-          <Text style={styles.recordingText}>Enregistrement {recordLabel}</Text>
-          <TouchableOpacity style={styles.recCancel} onPress={() => stopRecording(false)}>
-            <Text style={styles.recCancelText}>Annuler</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.recSend} onPress={() => stopRecording(true)}>
-            <Text style={styles.sendButtonText}>Envoyer</Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <View style={[styles.inputRow, { paddingBottom: bottomPad }]}>
-          <TouchableOpacity
-            style={styles.attachButton}
-            onPress={openMediaMenu}
-            disabled={uploading}
-            accessibilityLabel="Joindre une image ou une vidéo"
-          >
-            {uploading ? (
-              <ActivityIndicator size="small" color="#4a90d9" />
-            ) : (
-              <Text style={styles.attachButtonText}>＋</Text>
-            )}
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.attachButton}
-            onPress={startRecording}
-            disabled={uploading}
-            accessibilityLabel="Enregistrer un message audio"
-          >
-            <Text style={styles.micButtonText}>🎤</Text>
-          </TouchableOpacity>
-          <TextInput
-            style={styles.textInput}
-            placeholder="Votre message..."
-            value={text}
-            onChangeText={setText}
-            multiline
-            editable={!uploading}
-          />
-          <TouchableOpacity
-            style={[styles.sendButton, uploading && styles.sendButtonDisabled]}
-            onPress={() => sendMessage()}
-            disabled={uploading}
-          >
-            <Text style={styles.sendButtonText}>Envoyer</Text>
-          </TouchableOpacity>
-        </View>
-      )}
+      <ChatComposer
+        uploading={uploading}
+        text={text}
+        setText={setText}
+        onSendText={() => sendMessage()}
+        onOpenMedia={openMediaMenu}
+        onUploadUri={uploadUri}
+        bottomPad={bottomPad}
+      />
     </KeyboardAvoidingView>
   );
 }

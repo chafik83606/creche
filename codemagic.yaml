@@ -123,27 +123,20 @@ workflows:
           keychain add-certificates
       - name: Use provisioning profiles
         script: |
-          set -e
-          # Ne pas passer method via --custom-export-options : le CLI Codemagic
-          # plante (exit 9) avec app-store-connect. On patche le plist après.
+          set -euo pipefail
           xcode-project use-profiles --verbose
-          echo "=== export_options.plist (avant patch) ==="
-          plutil -p "$HOME/export_options.plist" || true
-          python3 <<'PY'
-          import os, plistlib
-          path = os.path.expanduser("~/export_options.plist")
-          with open(path, "rb") as f:
-              data = plistlib.load(f)
-          print("method avant:", data.get("method"))
-          # Xcode 26+ : app-store-connect
-          data["method"] = "app-store-connect"
-          data["destination"] = "export"
-          with open(path, "wb") as f:
-              plistlib.dump(data, f)
-          print("method apres:", data.get("method"))
-          PY
-          echo "=== export_options.plist (apres patch) ==="
-          plutil -p "$HOME/export_options.plist"
+          EXPORT_PLIST="$HOME/export_options.plist"
+          echo "=== export_options.plist (avant) ==="
+          plutil -p "$EXPORT_PLIST"
+          # Patch via PlistBuddy (évite de corrompre le plist avec Python)
+          /usr/libexec/PlistBuddy -c "Set :method app-store-connect" "$EXPORT_PLIST" \
+            || /usr/libexec/PlistBuddy -c "Add :method string app-store-connect" "$EXPORT_PLIST"
+          /usr/libexec/PlistBuddy -c "Set :destination export" "$EXPORT_PLIST" \
+            || /usr/libexec/PlistBuddy -c "Add :destination string export" "$EXPORT_PLIST"
+          plutil -convert xml1 "$EXPORT_PLIST"
+          plutil -lint "$EXPORT_PLIST"
+          echo "=== export_options.plist (apres) ==="
+          plutil -p "$EXPORT_PLIST"
       - name: Build IPA
         script: |
           set -euo pipefail
@@ -153,20 +146,8 @@ workflows:
           SCHEME=$(python3 -c "import json; s=json.load(open('/tmp/xcode_schemes.json'))['workspace']['schemes']; p=[x for x in s if x=='Zibou'] or [x for x in s if not x.startswith('EX')]; print((p or s)[0])")
           echo "Using workspace: $WORKSPACE"
           echo "Using scheme: $SCHEME"
-          plutil -p "$HOME/export_options.plist" || true
-
-          set +e
-          xcode-project build-ipa --workspace "$WORKSPACE" --scheme "$SCHEME"
-          BUILD_STATUS=$?
-          set -e
-
-          if [ "$BUILD_STATUS" -eq 0 ]; then
-            echo "IPA build succeeded"
-            exit 0
-          fi
-
-          echo "Export failed with app-store-connect — retry with app-store"
-          python3 -c "import os,plistlib; p=os.path.expanduser('~/export_options.plist'); d=plistlib.load(open(p,'rb')); d['method']='app-store'; d.pop('destination',None); plistlib.dump(d, open(p,'wb')); print(d.get('method'))"
+          plutil -lint "$HOME/export_options.plist"
+          plutil -p "$HOME/export_options.plist"
           xcode-project build-ipa --workspace "$WORKSPACE" --scheme "$SCHEME"
 
     artifacts:
