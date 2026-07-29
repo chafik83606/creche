@@ -8,9 +8,9 @@
     "userInterfaceStyle": "light",
     "scheme": "creche",
     "splash": {
-      "image": "./assets/splash.png",
+      "image": "./assets/icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#4a90d9"
     },
     "android": {
       "adaptiveIcon": {
@@ -18,13 +18,13 @@
         "foregroundImage": "./assets/android-icon-foreground.png"
       },
       "package": "fr.creche.app",
-      "versionCode": 7,
+      "versionCode": 8,
       "googleServicesFile": "./google-services.json"
     },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "fr.creche.app",
-      "buildNumber": "7",
+      "buildNumber": "8",
       "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
