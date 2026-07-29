@@ -123,9 +123,27 @@ workflows:
           keychain add-certificates
       - name: Use provisioning profiles
         script: |
-          # Xcode 26+ exige method=app-store-connect (plus app-store)
-          xcode-project use-profiles \
-            --custom-export-options='{"method":"app-store-connect","destination":"export"}'
+          set -e
+          # Ne pas passer method via --custom-export-options : le CLI Codemagic
+          # plante (exit 9) avec app-store-connect. On patche le plist après.
+          xcode-project use-profiles --verbose
+          echo "=== export_options.plist (avant patch) ==="
+          plutil -p "$HOME/export_options.plist" || true
+          python3 <<'PY'
+          import os, plistlib
+          path = os.path.expanduser("~/export_options.plist")
+          with open(path, "rb") as f:
+              data = plistlib.load(f)
+          print("method avant:", data.get("method"))
+          # Xcode 26+ : app-store-connect
+          data["method"] = "app-store-connect"
+          data["destination"] = "export"
+          with open(path, "wb") as f:
+              plistlib.dump(data, f)
+          print("method apres:", data.get("method"))
+          PY
+          echo "=== export_options.plist (apres patch) ==="
+          plutil -p "$HOME/export_options.plist"
       - name: Build IPA
         script: |
           set -e
@@ -142,22 +160,29 @@ workflows:
           ")
           echo "Using workspace: $WORKSPACE"
           echo "Using scheme: $SCHEME"
-          echo "Export options:"
-          plutil -p "$HOME/export_options.plist" || cat "$HOME/export_options.plist" || true
-          # Ceinture : forcer method si le CLI a encore écrit app-store
-          if [ -f "$HOME/export_options.plist" ]; then
-            /usr/libexec/PlistBuddy -c "Set :method app-store-connect" "$HOME/export_options.plist" \
-              || /usr/libexec/PlistBuddy -c "Add :method string app-store-connect" "$HOME/export_options.plist"
-          fi
-          xcode-project build-ipa \
-            --workspace "$WORKSPACE" \
-            --scheme "$SCHEME" \
-            --export-options-plist "$HOME/export_options.plist" || {
+          plutil -p "$HOME/export_options.plist" || true
+
+          if ! xcode-project build-ipa --workspace "$WORKSPACE" --scheme "$SCHEME"; then
+            echo "Export failed with app-store-connect — retry with app-store"
+            python3 <<'PY'
+            import os, plistlib
+            path = os.path.expanduser("~/export_options.plist")
+            with open(path, "rb") as f:
+                data = plistlib.load(f)
+            data["method"] = "app-store"
+            data.pop("destination", None)
+            with open(path, "wb") as f:
+                plistlib.dump(data, f)
+            print("method retry:", data.get("method"))
+            PY
+            xcode-project build-ipa --workspace "$WORKSPACE" --scheme "$SCHEME" || {
               echo "===== Bundle RN script logs (if any) ====="
               find "$HOME/Library/Developer/Xcode/DerivedData" -name '*Script-00DD1BFF*' -o -name '*Bundle*React*' 2>/dev/null | head -n 20 || true
               ls -la /tmp/xcodebuild_logs 2>/dev/null || true
               exit 1
             }
+          fi
+
     artifacts:
       - mobile/ios/build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
