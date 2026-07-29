@@ -126,7 +126,29 @@ export function PrivateChatPanel({
                     : 'bg-white text-gray-800 border rounded-bl-sm'
                 }`}
               >
-                <p className="text-sm leading-relaxed">{msg.body}</p>
+                {msg.mediaUrl && msg.mediaType === 'image' ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={msg.mediaUrl}
+                    alt="Pièce jointe"
+                    className="mb-2 max-h-56 w-full rounded-xl object-cover"
+                  />
+                ) : null}
+                {msg.mediaUrl && msg.mediaType === 'video' ? (
+                  <a
+                    href={msg.mediaUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className={`mb-2 block text-sm font-semibold underline ${
+                      isMine ? 'text-white' : 'text-blue-600'
+                    }`}
+                  >
+                    ▶ Voir la vidéo
+                  </a>
+                ) : null}
+                {msg.body && msg.body !== 'Image' && msg.body !== 'Vidéo' ? (
+                  <p className="text-sm leading-relaxed">{msg.body}</p>
+                ) : null}
                 <p className={`text-[10px] mt-1 ${isMine ? 'text-blue-200' : 'text-gray-400'}`}>
                   {formatFirestoreTime(msg.createdAt)}
                 </p>

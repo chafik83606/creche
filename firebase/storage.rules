@@ -40,5 +40,16 @@ service firebase.storage {
         && request.resource.size < 10 * 1024 * 1024
         && request.resource.contentType.matches('image/.*');
     }
+
+    // Pièces jointes messages privés
+    match /tenants/{tenantId}/chat/{childId}/{fileName} {
+      allow read: if hasTenantAccess(tenantId);
+      allow write: if hasTenantAccess(tenantId)
+        && request.resource.size < 25 * 1024 * 1024
+        && (
+          request.resource.contentType.matches('image/.*')
+          || request.resource.contentType.matches('video/.*')
+        );
+    }
   }
 }

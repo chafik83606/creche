@@ -7,6 +7,7 @@ import {
   ScrollView,
   ActivityIndicator,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { signOut } from 'firebase/auth';
 import {
   collection,
@@ -505,6 +506,7 @@ function DirectorHome({ tenantId }: { tenantId: string }) {
 
 export function HomeScreen() {
   const { role, user, claims } = useAuth();
+  const insets = useSafeAreaInsets();
 
   const tenantIds = claims?.tenantIds?.length ? claims.tenantIds : [FALLBACK_TENANT_ID];
   const [activeTenantId, setActiveTenantId] = useState(tenantIds[0]);
@@ -531,7 +533,7 @@ export function HomeScreen() {
 
   return (
     <View style={styles.flex}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: Math.max(insets.top, 12) + 12 }]}>
         <Text style={styles.headerTitle}>Creche</Text>
         <TouchableOpacity onPress={() => signOut(auth)}>
           <Text style={styles.logout}>Deconnexion</Text>
@@ -568,7 +570,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingTop: 56,
     paddingBottom: 12,
     backgroundColor: '#4a90d9',
   },

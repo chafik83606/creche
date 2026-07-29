@@ -18,13 +18,14 @@
         "foregroundImage": "./assets/android-icon-foreground.png"
       },
       "package": "fr.creche.app",
-      "versionCode": 9,
-      "googleServicesFile": "./google-services.json"
+      "versionCode": 10,
+      "googleServicesFile": "./google-services.json",
+      "softwareKeyboardLayoutMode": "resize"
     },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "fr.creche.app",
-      "buildNumber": "9",
+      "buildNumber": "10",
       "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
@@ -39,6 +40,13 @@
         {
           "icon": "./assets/icon.png",
           "color": "#4a90d9"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Autoriser Creche Connect à accéder à vos photos pour les partager dans le chat.",
+          "cameraPermission": "Autoriser Creche Connect à utiliser la caméra pour le chat."
         }
       ],
       "./plugins/withAndroidSigning.js",
