@@ -506,9 +506,18 @@ function DirectorHome({ tenantId }: { tenantId: string }) {
 export function HomeScreen() {
   const { role, user, claims } = useAuth();
 
-  const tenantId = claims?.tenantIds?.[0] ?? FALLBACK_TENANT_ID;
+  const tenantIds = claims?.tenantIds?.length ? claims.tenantIds : [FALLBACK_TENANT_ID];
+  const [activeTenantId, setActiveTenantId] = useState(tenantIds[0]);
   const childIds = claims?.childIds ?? [];
   const groupIds = claims?.groupIds ?? [];
+
+  useEffect(() => {
+    if (!tenantIds.includes(activeTenantId)) {
+      setActiveTenantId(tenantIds[tenantIds.length - 1] ?? FALLBACK_TENANT_ID);
+    }
+  }, [tenantIds.join('|'), activeTenantId]);
+
+  const tenantId = activeTenantId;
 
   useEffect(() => {
     if (!user) return;
@@ -538,7 +547,13 @@ export function HomeScreen() {
       {role === 'parent' && (
         <ParentHome tenantId={tenantId} childIds={childIds} />
       )}
-      {role === 'network_admin' && <AdminScreen tenantId={tenantId} />}
+      {role === 'network_admin' && (
+        <AdminScreen
+          tenantId={tenantId}
+          tenantIds={tenantIds}
+          onTenantChange={setActiveTenantId}
+        />
+      )}
       {role === 'director' && <DirectorHome tenantId={tenantId} />}
       {!role && <OnboardingScreen onDone={() => {}} />}
     </View>

@@ -63,8 +63,15 @@ export const setUserRole = onCall<SetRoleRequest>(async (request) => {
   }
 
   if (!uid && email) {
-    const userRecord = await auth.getUserByEmail(email.trim().toLowerCase());
-    uid = userRecord.uid;
+    try {
+      const userRecord = await auth.getUserByEmail(email.trim().toLowerCase());
+      uid = userRecord.uid;
+    } catch {
+      throw new HttpsError(
+        'not-found',
+        'Aucun compte trouvé avec cet email. La personne doit d\'abord créer un compte.'
+      );
+    }
   }
 
   if (!uid) {

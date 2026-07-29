@@ -16,6 +16,7 @@ import {
   updateDoc,
   arrayUnion,
   serverTimestamp,
+  Timestamp,
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { auth } from '../lib/firebase';
@@ -87,6 +88,15 @@ interface DayData {
 
 const EMPTY_DAY: DayData = { meals: [], naps: [], activities: [], health: [], diapers: [] };
 
+function toFirestoreEntry(entry: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(entry)) {
+    if (value === undefined) continue;
+    out[key] = value instanceof Date ? Timestamp.fromDate(value) : value;
+  }
+  return out;
+}
+
 export function DailyTrackingScreen({
   tenantId,
   childId,
@@ -142,15 +152,16 @@ export function DailyTrackingScreen({
   }, [tenantId, childId, date]);
 
   async function ensureLogAndUpdate(field: string, entry: Record<string, unknown>) {
+    const payload = toFirestoreEntry(entry);
     const logRef = doc(db, logPath);
     const existing = await getDoc(logRef);
     if (existing.exists()) {
-      await updateDoc(logRef, { [field]: arrayUnion(entry), updatedAt: serverTimestamp() });
+      await updateDoc(logRef, { [field]: arrayUnion(payload), updatedAt: serverTimestamp() });
     } else {
       await setDoc(logRef, {
         id: date, childId, date,
         meals: [], naps: [], health: [], activities: [], diapers: [],
-        [field]: [entry],
+        [field]: [payload],
         summarySent: false,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),

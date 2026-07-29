@@ -18,13 +18,13 @@
         "foregroundImage": "./assets/android-icon-foreground.png"
       },
       "package": "fr.creche.app",
-      "versionCode": 4,
+      "versionCode": 5,
       "googleServicesFile": "./google-services.json"
     },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "fr.creche.app",
-      "buildNumber": "4",
+      "buildNumber": "5",
       "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
@@ -41,7 +41,8 @@
           "color": "#4a90d9"
         }
       ],
-      "./plugins/withAndroidSigning.js"
+      "./plugins/withAndroidSigning.js",
+      "expo-secure-store"
     ],
     "extra": {
       "eas": {

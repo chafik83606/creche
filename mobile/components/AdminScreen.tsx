@@ -13,7 +13,8 @@ import {
 } from 'react-native';
 import { collection, doc, getDoc, getDocs, onSnapshot } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
-import { db, functions } from '../lib/firebase';
+import { auth, db, functions } from '../lib/firebase';
+import { getCallableErrorMessage } from '../lib/callable-error';
 import { paths, ROLES } from '@creche/shared';
 import type { Child, Group, Tenant, TenantMember, UserRole } from '@creche/shared';
 import { AnnouncementsScreen } from './AnnouncementsScreen';
@@ -34,16 +35,21 @@ type Invitation = {
 
 interface Props {
   tenantId: string;
+  tenantIds: string[];
+  onTenantChange: (tenantId: string) => void;
 }
+
+type TenantSummary = { id: string; name: string };
 
 function roleLabel(role: UserRole) {
   return ROLES[role]?.label ?? role;
 }
 
-export function AdminScreen({ tenantId }: Props) {
+export function AdminScreen({ tenantId, tenantIds, onTenantChange }: Props) {
   const [tab, setTab] = useState<AdminTab>('overview');
   const [loading, setLoading] = useState(true);
   const [tenant, setTenant] = useState<Tenant | null>(null);
+  const [allTenants, setAllTenants] = useState<TenantSummary[]>([]);
   const [members, setMembers] = useState<TenantMember[]>([]);
   const [children, setChildren] = useState<Child[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
@@ -67,19 +73,33 @@ export function AdminScreen({ tenantId }: Props) {
   const [pending, setPending] = useState(false);
 
   const loadStaticData = useCallback(async () => {
+    setLoading(true);
+    const tenantSnaps = await Promise.all(
+      tenantIds.map(async (id) => {
+        const snap = await getDoc(doc(db, paths.tenant(id)));
+        return {
+          id,
+          name: snap.exists() ? (snap.data().name as string) : id,
+        } as TenantSummary;
+      })
+    );
+
     const [tenantSnap, childrenSnap, groupsSnap] = await Promise.all([
       getDoc(doc(db, paths.tenant(tenantId))),
       getDocs(collection(db, paths.children(tenantId))),
       getDocs(collection(db, paths.groups(tenantId))),
     ]);
 
+    setAllTenants(tenantSnaps);
     if (tenantSnap.exists()) {
       setTenant({ id: tenantSnap.id, ...tenantSnap.data() } as Tenant);
+    } else {
+      setTenant(null);
     }
     setChildren(childrenSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Child)));
     setGroups(groupsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Group)));
     setLoading(false);
-  }, [tenantId]);
+  }, [tenantId, tenantIds.join('|')]);
 
   useEffect(() => {
     loadStaticData();
@@ -121,7 +141,7 @@ export function AdminScreen({ tenantId }: Props) {
       setShowAssignModal(false);
       setAssignEmail('');
     } catch (error) {
-      Alert.alert('Erreur', error instanceof Error ? error.message : 'Impossible d’attribuer le rôle.');
+      Alert.alert('Erreur', getCallableErrorMessage(error, 'Impossible d’attribuer le rôle.'));
     } finally {
       setPending(false);
     }
@@ -148,7 +168,7 @@ export function AdminScreen({ tenantId }: Props) {
       setShowInviteModal(false);
       setInviteEmail('');
     } catch (error) {
-      Alert.alert('Erreur', error instanceof Error ? error.message : 'Impossible de créer l’invitation.');
+      Alert.alert('Erreur', getCallableErrorMessage(error, 'Impossible de créer l’invitation.'));
     } finally {
       setPending(false);
     }
@@ -161,12 +181,14 @@ export function AdminScreen({ tenantId }: Props) {
       const createTenant = httpsCallable(functions, 'createTenant');
       const result = await createTenant({ name: newTenantName.trim(), address: newTenantAddress.trim() });
       const data = result.data as { tenantId: string };
+      await auth.currentUser?.getIdToken(true);
+      onTenantChange(data.tenantId);
       Alert.alert('Crèche créée', `Nouvelle crèche: ${data.tenantId}`);
       setShowCreateTenantModal(false);
       setNewTenantName('');
       setNewTenantAddress('');
     } catch (error) {
-      Alert.alert('Erreur', error instanceof Error ? error.message : 'Impossible de créer la crèche.');
+      Alert.alert('Erreur', getCallableErrorMessage(error, 'Impossible de créer la crèche.'));
     } finally {
       setPending(false);
     }
@@ -202,6 +224,28 @@ export function AdminScreen({ tenantId }: Props) {
       {tab === 'overview' && (
         <ScrollView style={styles.panel} contentContainerStyle={styles.panelContent}>
           <Text style={styles.panelTitle}>Administration réseau</Text>
+
+          {allTenants.length > 0 && (
+            <View style={styles.tenantPickerSection}>
+              <Text style={styles.fieldLabel}>Crèches gérées</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <View style={styles.chipRow}>
+                  {allTenants.map((t) => (
+                    <TouchableOpacity
+                      key={t.id}
+                      style={[styles.chip, tenantId === t.id && styles.chipActive]}
+                      onPress={() => onTenantChange(t.id)}
+                    >
+                      <Text style={[styles.chipText, tenantId === t.id && styles.chipTextActive]}>
+                        {t.name}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </ScrollView>
+            </View>
+          )}
+
           <View style={styles.card}>
             <Text style={styles.cardTitle}>{tenant?.name ?? 'Crèche'}</Text>
             <Text style={styles.cardMeta}>{tenant?.address}</Text>
@@ -369,6 +413,7 @@ const styles = StyleSheet.create({
   statValue: { fontSize: 24, fontWeight: '700', color: '#4a90d9' },
   statLabel: { fontSize: 12, color: '#888', marginTop: 4 },
   hint: { fontSize: 13, color: '#666', lineHeight: 20 },
+  tenantPickerSection: { marginBottom: 16 },
   primaryButton: {
     backgroundColor: '#1a1a2e',
     borderRadius: 10,

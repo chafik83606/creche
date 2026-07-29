@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -10,9 +10,12 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
 import { auth, functions } from '../lib/firebase';
+import { getAppVersionLabel } from '../lib/app-version';
+import { clearSavedLogin, loadSavedLogin, saveLogin } from '../lib/saved-credentials';
 
 export function AuthScreen() {
   const [email, setEmail] = useState('');
@@ -21,6 +24,52 @@ export function AuthScreen() {
   const [inviteCode, setInviteCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [isRegister, setIsRegister] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [maskPassword, setMaskPassword] = useState(true);
+  const maskTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [rememberMe, setRememberMe] = useState(true);
+  const [credentialsLoaded, setCredentialsLoaded] = useState(false);
+
+  const versionLabel = getAppVersionLabel();
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const saved = await loadSavedLogin();
+      if (cancelled) return;
+      if (saved) {
+        setEmail(saved.email);
+        setPassword(saved.password);
+        setRememberMe(true);
+      }
+      setCredentialsLoaded(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (maskTimeoutRef.current) clearTimeout(maskTimeoutRef.current);
+    };
+  }, []);
+
+  function handlePasswordChange(text: string) {
+    setPassword(text);
+    if (showPassword) return;
+    setMaskPassword(false);
+    if (maskTimeoutRef.current) clearTimeout(maskTimeoutRef.current);
+    maskTimeoutRef.current = setTimeout(() => setMaskPassword(true), Platform.OS === 'android' ? 900 : 0);
+  }
+
+  async function persistLoginIfNeeded() {
+    if (!isRegister && rememberMe) {
+      await saveLogin(email.trim().toLowerCase(), password);
+      return;
+    }
+    await clearSavedLogin();
+  }
 
   async function handleSubmit() {
     if (!email.trim() || !password.trim()) {
@@ -54,6 +103,7 @@ export function AuthScreen() {
         }
       } else {
         await signInWithEmailAndPassword(auth, email.trim(), password);
+        await persistLoginIfNeeded();
       }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Erreur de connexion';
@@ -63,11 +113,21 @@ export function AuthScreen() {
     }
   }
 
+  if (!credentialsLoaded) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator color="#fff" size="large" />
+      </View>
+    );
+  }
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
+      <Text style={styles.versionBadge}>{versionLabel}</Text>
+
       <View style={styles.card}>
         <Text style={styles.logo}>🏫</Text>
         <Text style={styles.title}>Crèche</Text>
@@ -92,14 +152,51 @@ export function AuthScreen() {
           keyboardType="email-address"
           autoCapitalize="none"
           autoCorrect={false}
+          textContentType="username"
+          autoComplete="email"
         />
-        <TextInput
-          style={styles.input}
-          placeholder="Mot de passe"
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-        />
+
+        <View style={styles.passwordRow}>
+          <TextInput
+            style={styles.passwordInput}
+            placeholder="Mot de passe"
+            value={password}
+            onChangeText={handlePasswordChange}
+            secureTextEntry={!showPassword && (Platform.OS === 'ios' || maskPassword)}
+            textContentType={isRegister ? 'newPassword' : 'password'}
+            autoCapitalize="none"
+            autoCorrect={false}
+            importantForAutofill="no"
+          />
+          <TouchableOpacity
+            style={styles.eyeButton}
+            onPress={() => {
+              setShowPassword((prev) => !prev);
+              setMaskPassword(true);
+            }}
+            accessibilityLabel={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+          >
+            <Ionicons
+              name={showPassword ? 'eye-off-outline' : 'eye-outline'}
+              size={22}
+              color="#666"
+            />
+          </TouchableOpacity>
+        </View>
+
+        {!isRegister && (
+          <TouchableOpacity
+            style={styles.rememberRow}
+            onPress={() => setRememberMe((prev) => !prev)}
+          >
+            <Ionicons
+              name={rememberMe ? 'checkbox' : 'square-outline'}
+              size={22}
+              color={rememberMe ? '#4a90d9' : '#999'}
+            />
+            <Text style={styles.rememberText}>Se souvenir de moi</Text>
+          </TouchableOpacity>
+        )}
 
         {isRegister && (
           <TextInput
@@ -145,6 +242,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 24,
   },
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: '#4a90d9',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  versionBadge: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 72 : 40,
+    left: 20,
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: 13,
+    fontWeight: '600',
+  },
   card: {
     backgroundColor: '#fff',
     borderRadius: 16,
@@ -164,6 +275,33 @@ const styles = StyleSheet.create({
     padding: 14,
     fontSize: 15,
     marginBottom: 12,
+  },
+  passwordRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 10,
+    marginBottom: 12,
+    paddingRight: 8,
+  },
+  passwordInput: {
+    flex: 1,
+    padding: 14,
+    fontSize: 15,
+  },
+  eyeButton: {
+    padding: 8,
+  },
+  rememberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  rememberText: {
+    fontSize: 14,
+    color: '#444',
   },
   button: {
     backgroundColor: '#4a90d9',

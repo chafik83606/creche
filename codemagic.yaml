@@ -138,7 +138,8 @@ workflows:
     max_build_duration: 90
     instance_type: linux_x2
     environment:
-      android_signing:
+      groups:
+        - google_play_credentials
         - creche_android
       node: 20
       java: 17
@@ -167,6 +168,24 @@ workflows:
             "EXPO_PUBLIC_FIREBASE_APP_ID=$EXPO_PUBLIC_FIREBASE_APP_ID" \
             "EXPO_PUBLIC_USE_EMULATORS=$EXPO_PUBLIC_USE_EMULATORS" \
             > .env
+      - name: Set native build numbers
+        script: |
+          cd mobile
+          node <<'NODE'
+          const fs = require('fs');
+          const build = String(process.env.BUILD_NUMBER || '6');
+          const app = JSON.parse(fs.readFileSync('app.json', 'utf8'));
+          app.expo.ios = app.expo.ios || {};
+          app.expo.android = app.expo.android || {};
+          app.expo.ios.buildNumber = build;
+          app.expo.android.versionCode = parseInt(build, 10);
+          fs.writeFileSync('app.json', JSON.stringify(app, null, 2) + '\n');
+          console.log('iOS buildNumber:', build, '| Android versionCode:', build);
+          NODE
+      - name: Decode Android keystore
+        script: |
+          echo "$CM_KEYSTORE" | base64 --decode > "$CM_KEYSTORE_PATH"
+          ls -la "$CM_KEYSTORE_PATH"
       - name: Prebuild Android
         script: |
           cd mobile
@@ -185,10 +204,8 @@ workflows:
           ./gradlew bundleRelease
     artifacts:
       - mobile/android/app/build/outputs/bundle/release/*.aab
-    # Upload Play : activer quand le groupe Codemagic `google_play_credentials`
-    # et le keystore `creche_android` sont configurés.
-    # publishing:
-    #   google_play:
-    #     credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
-    #     track: internal
-    #     submit_as_draft: true
+    publishing:
+      google_play:
+        credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+        track: internal
+        submit_as_draft: true
