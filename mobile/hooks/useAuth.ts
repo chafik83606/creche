@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { User, onAuthStateChanged, getIdTokenResult } from 'firebase/auth';
+import { User, onIdTokenChanged, getIdTokenResult } from 'firebase/auth';
 import { auth } from '../lib/firebase';
 import type { CustomClaims, UserRole } from '@creche/shared';
 import { ROLES } from '@creche/shared';
@@ -22,13 +22,13 @@ export function useAuth(): AuthState {
   });
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    const unsubscribe = onIdTokenChanged(auth, async (user) => {
       if (!user) {
         setState({ user: null, claims: null, role: null, homeRoute: null, loading: false });
         return;
       }
 
-      const tokenResult = await getIdTokenResult(user, true);
+      const tokenResult = await getIdTokenResult(user);
       const claims = tokenResult.claims as unknown as CustomClaims;
       const role = claims.role ?? null;
       const homeRoute = role ? ROLES[role].homeRoute : null;

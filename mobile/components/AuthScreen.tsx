@@ -11,11 +11,14 @@ import {
   Platform,
 } from 'react-native';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
-import { auth } from '../lib/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { auth, functions } from '../lib/firebase';
 
 export function AuthScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [inviteCode, setInviteCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [isRegister, setIsRegister] = useState(false);
 
@@ -24,12 +27,31 @@ export function AuthScreen() {
       Alert.alert('Erreur', 'Veuillez remplir tous les champs.');
       return;
     }
+    if (isRegister && !displayName.trim()) {
+      Alert.alert('Erreur', 'Veuillez renseigner votre nom.');
+      return;
+    }
 
     setLoading(true);
     try {
       if (isRegister) {
-        await createUserWithEmailAndPassword(auth, email.trim(), password);
-        Alert.alert('Compte créé', 'Votre compte a été créé. Un administrateur doit vous attribuer un rôle.');
+        if (inviteCode.trim()) {
+          const registerWithInvite = httpsCallable(functions, 'registerWithInvite');
+          await registerWithInvite({
+            email: email.trim().toLowerCase(),
+            password,
+            displayName: displayName.trim(),
+            inviteCode: inviteCode.trim().toUpperCase(),
+          });
+          await signInWithEmailAndPassword(auth, email.trim(), password);
+          Alert.alert('Compte créé', 'Inscription via invitation réussie.');
+        } else {
+          await createUserWithEmailAndPassword(auth, email.trim(), password);
+          Alert.alert(
+            'Compte créé',
+            'Compte créé. Créez ensuite votre première crèche pour activer le rôle admin.'
+          );
+        }
       } else {
         await signInWithEmailAndPassword(auth, email.trim(), password);
       }
@@ -53,6 +75,15 @@ export function AuthScreen() {
           {isRegister ? 'Créer un compte' : 'Connexion'}
         </Text>
 
+        {isRegister && (
+          <TextInput
+            style={styles.input}
+            placeholder="Nom complet"
+            value={displayName}
+            onChangeText={setDisplayName}
+          />
+        )}
+
         <TextInput
           style={styles.input}
           placeholder="Email"
@@ -69,6 +100,17 @@ export function AuthScreen() {
           onChangeText={setPassword}
           secureTextEntry
         />
+
+        {isRegister && (
+          <TextInput
+            style={styles.input}
+            placeholder="Code d'invitation (optionnel)"
+            value={inviteCode}
+            onChangeText={setInviteCode}
+            autoCapitalize="characters"
+            autoCorrect={false}
+          />
+        )}
 
         <TouchableOpacity
           style={[styles.button, loading && styles.buttonDisabled]}

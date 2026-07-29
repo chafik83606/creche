@@ -24,6 +24,7 @@ import { ConsentScreen } from './ConsentScreen';
 import { ConsentManageScreen } from './ConsentManageScreen';
 import { PrivateChatScreen } from './PrivateChatScreen';
 import { AdminScreen } from './AdminScreen';
+import { OnboardingScreen } from './OnboardingScreen';
 import { registerForPushNotifications, addNotificationListeners } from '../lib/notifications';
 import { paths } from '@creche/shared';
 import type { UserRole } from '@creche/shared';
@@ -510,14 +511,7 @@ export function HomeScreen() {
       )}
       {role === 'network_admin' && <AdminScreen tenantId={tenantId} />}
       {role === 'director' && <ManagementHome role={role} tenantId={tenantId} />}
-      {!role && (
-        <View style={styles.noRole}>
-          <Text style={styles.noRoleText}>
-            Votre compte n'a pas encore de rôle attribué.{'\n'}
-            Contactez l'administrateur de votre crèche.
-          </Text>
-        </View>
-      )}
+      {!role && <OnboardingScreen onDone={() => {}} />}
     </View>
   );
 }

@@ -11,22 +11,26 @@ import {
   Modal,
   FlatList,
 } from 'react-native';
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  onSnapshot,
-} from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, onSnapshot } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../lib/firebase';
 import { paths, ROLES } from '@creche/shared';
 import type { Child, Group, Tenant, TenantMember, UserRole } from '@creche/shared';
 import { AnnouncementsScreen } from './AnnouncementsScreen';
 
-type AdminTab = 'overview' | 'members' | 'children' | 'groups' | 'annonces';
+type AdminTab = 'overview' | 'members' | 'invitations' | 'children' | 'groups' | 'annonces';
 
 const ASSIGNABLE_ROLES: UserRole[] = ['parent', 'educator', 'director'];
+
+type Invitation = {
+  id: string;
+  email: string;
+  role: UserRole;
+  inviteCode: string;
+  childId?: string | null;
+  groupIds?: string[];
+  usedAt?: unknown;
+};
 
 interface Props {
   tenantId: string;
@@ -43,12 +47,24 @@ export function AdminScreen({ tenantId }: Props) {
   const [members, setMembers] = useState<TenantMember[]>([]);
   const [children, setChildren] = useState<Child[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
+  const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [showAssignModal, setShowAssignModal] = useState(false);
+  const [showInviteModal, setShowInviteModal] = useState(false);
+  const [showCreateTenantModal, setShowCreateTenantModal] = useState(false);
+
   const [assignEmail, setAssignEmail] = useState('');
   const [assignRole, setAssignRole] = useState<UserRole>('parent');
   const [assignGroupId, setAssignGroupId] = useState('');
   const [assignChildId, setAssignChildId] = useState('');
-  const [assigning, setAssigning] = useState(false);
+
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState<UserRole>('parent');
+  const [inviteGroupId, setInviteGroupId] = useState('');
+  const [inviteChildId, setInviteChildId] = useState('');
+
+  const [newTenantName, setNewTenantName] = useState('');
+  const [newTenantAddress, setNewTenantAddress] = useState('');
+  const [pending, setPending] = useState(false);
 
   const loadStaticData = useCallback(async () => {
     const [tenantSnap, childrenSnap, groupsSnap] = await Promise.all([
@@ -60,10 +76,7 @@ export function AdminScreen({ tenantId }: Props) {
     if (tenantSnap.exists()) {
       setTenant({ id: tenantSnap.id, ...tenantSnap.data() } as Tenant);
     }
-
-    setChildren(
-      childrenSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Child))
-    );
+    setChildren(childrenSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Child)));
     setGroups(groupsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Group)));
     setLoading(false);
   }, [tenantId]);
@@ -73,32 +86,28 @@ export function AdminScreen({ tenantId }: Props) {
   }, [loadStaticData]);
 
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, paths.members(tenantId)), (snap) => {
+    const unsubMembers = onSnapshot(collection(db, paths.members(tenantId)), (snap) => {
       const list = snap.docs.map((d) => ({ uid: d.id, ...d.data() } as TenantMember));
       list.sort((a, b) => roleLabel(a.role).localeCompare(roleLabel(b.role)));
       setMembers(list);
     });
-    return unsub;
+    const unsubInvites = onSnapshot(collection(db, paths.invitations(tenantId)), (snap) => {
+      const list = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Invitation));
+      setInvitations(list);
+    });
+    return () => {
+      unsubMembers();
+      unsubInvites();
+    };
   }, [tenantId]);
 
   async function handleAssignRole() {
     const email = assignEmail.trim().toLowerCase();
-    if (!email) {
-      Alert.alert('Erreur', 'Indiquez l’email du compte.');
-      return;
-    }
+    if (!email) return Alert.alert('Erreur', 'Indiquez l’email du compte.');
+    if (assignRole === 'educator' && !assignGroupId) return Alert.alert('Erreur', 'Sélectionnez un groupe.');
+    if (assignRole === 'parent' && !assignChildId) return Alert.alert('Erreur', 'Sélectionnez un enfant.');
 
-    if (assignRole === 'educator' && !assignGroupId) {
-      Alert.alert('Erreur', 'Sélectionnez un groupe pour l’éducateur.');
-      return;
-    }
-
-    if (assignRole === 'parent' && !assignChildId) {
-      Alert.alert('Erreur', 'Sélectionnez un enfant pour le parent.');
-      return;
-    }
-
-    setAssigning(true);
+    setPending(true);
     try {
       const setUserRole = httpsCallable(functions, 'setUserRole');
       await setUserRole({
@@ -108,23 +117,58 @@ export function AdminScreen({ tenantId }: Props) {
         ...(assignRole === 'educator' && { groupIds: [assignGroupId] }),
         ...(assignRole === 'parent' && { childIds: [assignChildId] }),
       });
-
-      Alert.alert(
-        'Rôle attribué',
-        `Le compte ${email} est maintenant ${roleLabel(assignRole).toLowerCase()}. La personne doit se reconnecter pour voir les changements.`
-      );
+      Alert.alert('Rôle attribué', `Le compte ${email} est maintenant ${roleLabel(assignRole).toLowerCase()}.`);
       setShowAssignModal(false);
       setAssignEmail('');
-      setAssignRole('parent');
-      setAssignGroupId('');
-      setAssignChildId('');
     } catch (error) {
-      const message =
-        error instanceof Error ? error.message : 'Impossible d’attribuer le rôle.';
-      Alert.alert('Erreur', message);
-      console.error(error);
+      Alert.alert('Erreur', error instanceof Error ? error.message : 'Impossible d’attribuer le rôle.');
     } finally {
-      setAssigning(false);
+      setPending(false);
+    }
+  }
+
+  async function handleCreateInvitation() {
+    const email = inviteEmail.trim().toLowerCase();
+    if (!email) return Alert.alert('Erreur', 'Indiquez l’email du membre.');
+    if (inviteRole === 'educator' && !inviteGroupId) return Alert.alert('Erreur', 'Sélectionnez un groupe.');
+    if (inviteRole === 'parent' && !inviteChildId) return Alert.alert('Erreur', 'Sélectionnez un enfant.');
+
+    setPending(true);
+    try {
+      const createInvitation = httpsCallable(functions, 'createInvitation');
+      const result = await createInvitation({
+        tenantId,
+        email,
+        role: inviteRole,
+        ...(inviteRole === 'educator' && { groupIds: [inviteGroupId] }),
+        ...(inviteRole === 'parent' && { childId: inviteChildId }),
+      });
+      const data = result.data as { inviteCode: string };
+      Alert.alert('Invitation créée', `Code: ${data.inviteCode}\nEnvoyez ce code à ${email}.`);
+      setShowInviteModal(false);
+      setInviteEmail('');
+    } catch (error) {
+      Alert.alert('Erreur', error instanceof Error ? error.message : 'Impossible de créer l’invitation.');
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function handleCreateTenant() {
+    if (!newTenantName.trim()) return Alert.alert('Erreur', 'Nom de crèche requis.');
+    setPending(true);
+    try {
+      const createTenant = httpsCallable(functions, 'createTenant');
+      const result = await createTenant({ name: newTenantName.trim(), address: newTenantAddress.trim() });
+      const data = result.data as { tenantId: string };
+      Alert.alert('Crèche créée', `Nouvelle crèche: ${data.tenantId}`);
+      setShowCreateTenantModal(false);
+      setNewTenantName('');
+      setNewTenantAddress('');
+    } catch (error) {
+      Alert.alert('Erreur', error instanceof Error ? error.message : 'Impossible de créer la crèche.');
+    } finally {
+      setPending(false);
     }
   }
 
@@ -138,29 +182,19 @@ export function AdminScreen({ tenantId }: Props) {
 
   return (
     <View style={styles.flex}>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        style={styles.tabBarScroll}
-        contentContainerStyle={styles.tabBarContent}
-      >
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabBarScroll} contentContainerStyle={styles.tabBarContent}>
         {(
           [
             ['overview', 'Vue d’ensemble'],
             ['members', 'Membres'],
+            ['invitations', 'Invitations'],
             ['children', 'Enfants'],
             ['groups', 'Groupes'],
             ['annonces', 'Annonces'],
           ] as const
         ).map(([key, label]) => (
-          <TouchableOpacity
-            key={key}
-            style={[styles.tab, tab === key && styles.tabActive]}
-            onPress={() => setTab(key)}
-          >
-            <Text style={[styles.tabText, tab === key && styles.tabTextActive]}>
-              {label}
-            </Text>
+          <TouchableOpacity key={key} style={[styles.tab, tab === key && styles.tabActive]} onPress={() => setTab(key)}>
+            <Text style={[styles.tabText, tab === key && styles.tabTextActive]}>{label}</Text>
           </TouchableOpacity>
         ))}
       </ScrollView>
@@ -171,58 +205,59 @@ export function AdminScreen({ tenantId }: Props) {
           <View style={styles.card}>
             <Text style={styles.cardTitle}>{tenant?.name ?? 'Crèche'}</Text>
             <Text style={styles.cardMeta}>{tenant?.address}</Text>
-            <Text style={styles.cardMeta}>
-              Statut : {tenant?.subscriptionStatus ?? '—'}
-            </Text>
+            <Text style={styles.cardMeta}>Statut : {tenant?.subscriptionStatus ?? '—'}</Text>
           </View>
-
           <View style={styles.statsRow}>
-            <View style={styles.statCard}>
-              <Text style={styles.statValue}>{members.length}</Text>
-              <Text style={styles.statLabel}>Membres</Text>
-            </View>
-            <View style={styles.statCard}>
-              <Text style={styles.statValue}>{children.length}</Text>
-              <Text style={styles.statLabel}>Enfants</Text>
-            </View>
-            <View style={styles.statCard}>
-              <Text style={styles.statValue}>{groups.length}</Text>
-              <Text style={styles.statLabel}>Groupes</Text>
-            </View>
+            <View style={styles.statCard}><Text style={styles.statValue}>{members.length}</Text><Text style={styles.statLabel}>Membres</Text></View>
+            <View style={styles.statCard}><Text style={styles.statValue}>{children.length}</Text><Text style={styles.statLabel}>Enfants</Text></View>
+            <View style={styles.statCard}><Text style={styles.statValue}>{groups.length}</Text><Text style={styles.statLabel}>Groupes</Text></View>
           </View>
-
-          <Text style={styles.hint}>
-            Utilisez l’onglet Membres pour attribuer un rôle aux comptes inscrits
-            sans accès (ex. après inscription libre).
-          </Text>
+          <TouchableOpacity style={styles.primaryButton} onPress={() => setShowCreateTenantModal(true)}>
+            <Text style={styles.primaryButtonText}>+ Créer une nouvelle crèche</Text>
+          </TouchableOpacity>
+          <Text style={styles.hint}>Invitez les membres via l’onglet Invitations, puis attribuez les rôles si nécessaire.</Text>
         </ScrollView>
       )}
 
       {tab === 'members' && (
         <View style={styles.panel}>
-          <TouchableOpacity
-            style={styles.primaryButton}
-            onPress={() => setShowAssignModal(true)}
-          >
+          <TouchableOpacity style={styles.primaryButton} onPress={() => setShowAssignModal(true)}>
             <Text style={styles.primaryButtonText}>+ Attribuer un rôle</Text>
           </TouchableOpacity>
-
           <FlatList
             data={members}
             keyExtractor={(item) => item.uid}
             contentContainerStyle={styles.listContent}
             renderItem={({ item }) => (
               <View style={styles.listCard}>
-                <Text style={styles.listTitle}>
-                  {item.displayName || item.email || item.uid}
-                </Text>
+                <Text style={styles.listTitle}>{item.displayName || item.email || item.uid}</Text>
                 <Text style={styles.listMeta}>{item.email}</Text>
                 <Text style={styles.roleBadge}>{roleLabel(item.role)}</Text>
               </View>
             )}
-            ListEmptyComponent={
-              <Text style={styles.empty}>Aucun membre enregistré.</Text>
-            }
+          />
+        </View>
+      )}
+
+      {tab === 'invitations' && (
+        <View style={styles.panel}>
+          <TouchableOpacity style={styles.primaryButton} onPress={() => setShowInviteModal(true)}>
+            <Text style={styles.primaryButtonText}>+ Inviter un membre</Text>
+          </TouchableOpacity>
+          <FlatList
+            data={invitations}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.listContent}
+            renderItem={({ item }) => (
+              <View style={styles.listCard}>
+                <Text style={styles.listTitle}>{item.email}</Text>
+                <Text style={styles.listMeta}>
+                  {roleLabel(item.role)} • Code: {item.inviteCode}
+                </Text>
+                <Text style={styles.listMeta}>{item.usedAt ? 'Utilisée' : 'En attente'}</Text>
+              </View>
+            )}
+            ListEmptyComponent={<Text style={styles.empty}>Aucune invitation.</Text>}
           />
         </View>
       )}
@@ -233,26 +268,11 @@ export function AdminScreen({ tenantId }: Props) {
             const group = groups.find((g) => g.id === child.groupId);
             return (
               <View key={child.id} style={styles.listCard}>
-                <Text style={styles.listTitle}>
-                  {child.firstName} {child.lastName}
-                </Text>
-                <Text style={styles.listMeta}>
-                  Groupe : {group?.name ?? child.groupId}
-                </Text>
-                <Text style={styles.listMeta}>
-                  Parents liés : {child.parentIds?.length ?? 0}
-                </Text>
-                {child.allergies?.length > 0 && (
-                  <Text style={styles.listMeta}>
-                    Allergies : {child.allergies.join(', ')}
-                  </Text>
-                )}
+                <Text style={styles.listTitle}>{child.firstName} {child.lastName}</Text>
+                <Text style={styles.listMeta}>Groupe : {group?.name ?? child.groupId}</Text>
               </View>
             );
           })}
-          {children.length === 0 && (
-            <Text style={styles.empty}>Aucun enfant enregistré.</Text>
-          )}
         </ScrollView>
       )}
 
@@ -261,134 +281,48 @@ export function AdminScreen({ tenantId }: Props) {
           {groups.map((group) => (
             <View key={group.id} style={styles.listCard}>
               <Text style={styles.listTitle}>{group.name}</Text>
-              <Text style={styles.listMeta}>
-                Éducateurs : {group.educatorIds?.length ?? 0}
-              </Text>
+              <Text style={styles.listMeta}>Éducateurs : {group.educatorIds?.length ?? 0}</Text>
             </View>
           ))}
-          {groups.length === 0 && (
-            <Text style={styles.empty}>Aucun groupe enregistré.</Text>
-          )}
         </ScrollView>
       )}
 
-      {tab === 'annonces' && (
-        <AnnouncementsScreen tenantId={tenantId} canSend />
-      )}
+      {tab === 'annonces' && <AnnouncementsScreen tenantId={tenantId} canSend />}
 
       <Modal visible={showAssignModal} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <ScrollView contentContainerStyle={styles.modalScroll}>
-            <View style={styles.modalCard}>
-              <Text style={styles.modalTitle}>Attribuer un rôle</Text>
-              <Text style={styles.modalHint}>
-                L’utilisateur doit déjà avoir créé un compte avec cet email.
-              </Text>
+        <View style={styles.modalOverlay}><ScrollView contentContainerStyle={styles.modalScroll}><View style={styles.modalCard}>
+          <Text style={styles.modalTitle}>Attribuer un rôle</Text>
+          <TextInput style={styles.input} placeholder="email@exemple.com" value={assignEmail} onChangeText={setAssignEmail} autoCapitalize="none" />
+          <Text style={styles.fieldLabel}>Rôle</Text>
+          <View style={styles.chipRow}>{ASSIGNABLE_ROLES.map((r) => <TouchableOpacity key={r} style={[styles.chip, assignRole === r && styles.chipActive]} onPress={() => setAssignRole(r)}><Text style={[styles.chipText, assignRole === r && styles.chipTextActive]}>{roleLabel(r)}</Text></TouchableOpacity>)}</View>
+          {assignRole === 'educator' && <View style={styles.chipRow}>{groups.map((g) => <TouchableOpacity key={g.id} style={[styles.chip, assignGroupId === g.id && styles.chipActive]} onPress={() => setAssignGroupId(g.id)}><Text style={[styles.chipText, assignGroupId === g.id && styles.chipTextActive]}>{g.name}</Text></TouchableOpacity>)}</View>}
+          {assignRole === 'parent' && <View style={styles.chipRow}>{children.map((c) => <TouchableOpacity key={c.id} style={[styles.chip, assignChildId === c.id && styles.chipActive]} onPress={() => setAssignChildId(c.id)}><Text style={[styles.chipText, assignChildId === c.id && styles.chipTextActive]}>{c.firstName}</Text></TouchableOpacity>)}</View>}
+          <TouchableOpacity style={[styles.primaryButton, pending && styles.buttonDisabled]} onPress={handleAssignRole} disabled={pending}><Text style={styles.primaryButtonText}>Confirmer</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.cancelButton} onPress={() => setShowAssignModal(false)}><Text style={styles.cancelButtonText}>Annuler</Text></TouchableOpacity>
+        </View></ScrollView></View>
+      </Modal>
 
-              <TextInput
-                style={styles.input}
-                placeholder="email@exemple.com"
-                value={assignEmail}
-                onChangeText={setAssignEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
+      <Modal visible={showInviteModal} animationType="slide" transparent>
+        <View style={styles.modalOverlay}><ScrollView contentContainerStyle={styles.modalScroll}><View style={styles.modalCard}>
+          <Text style={styles.modalTitle}>Inviter un membre</Text>
+          <TextInput style={styles.input} placeholder="email@exemple.com" value={inviteEmail} onChangeText={setInviteEmail} autoCapitalize="none" />
+          <Text style={styles.fieldLabel}>Rôle</Text>
+          <View style={styles.chipRow}>{ASSIGNABLE_ROLES.map((r) => <TouchableOpacity key={r} style={[styles.chip, inviteRole === r && styles.chipActive]} onPress={() => setInviteRole(r)}><Text style={[styles.chipText, inviteRole === r && styles.chipTextActive]}>{roleLabel(r)}</Text></TouchableOpacity>)}</View>
+          {inviteRole === 'educator' && <View style={styles.chipRow}>{groups.map((g) => <TouchableOpacity key={g.id} style={[styles.chip, inviteGroupId === g.id && styles.chipActive]} onPress={() => setInviteGroupId(g.id)}><Text style={[styles.chipText, inviteGroupId === g.id && styles.chipTextActive]}>{g.name}</Text></TouchableOpacity>)}</View>}
+          {inviteRole === 'parent' && <View style={styles.chipRow}>{children.map((c) => <TouchableOpacity key={c.id} style={[styles.chip, inviteChildId === c.id && styles.chipActive]} onPress={() => setInviteChildId(c.id)}><Text style={[styles.chipText, inviteChildId === c.id && styles.chipTextActive]}>{c.firstName}</Text></TouchableOpacity>)}</View>}
+          <TouchableOpacity style={[styles.primaryButton, pending && styles.buttonDisabled]} onPress={handleCreateInvitation} disabled={pending}><Text style={styles.primaryButtonText}>Créer invitation</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.cancelButton} onPress={() => setShowInviteModal(false)}><Text style={styles.cancelButtonText}>Annuler</Text></TouchableOpacity>
+        </View></ScrollView></View>
+      </Modal>
 
-              <Text style={styles.fieldLabel}>Rôle</Text>
-              <View style={styles.chipRow}>
-                {ASSIGNABLE_ROLES.map((r) => (
-                  <TouchableOpacity
-                    key={r}
-                    style={[styles.chip, assignRole === r && styles.chipActive]}
-                    onPress={() => setAssignRole(r)}
-                  >
-                    <Text
-                      style={[
-                        styles.chipText,
-                        assignRole === r && styles.chipTextActive,
-                      ]}
-                    >
-                      {roleLabel(r)}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              {assignRole === 'educator' && (
-                <>
-                  <Text style={styles.fieldLabel}>Groupe</Text>
-                  <View style={styles.chipRow}>
-                    {groups.map((g) => (
-                      <TouchableOpacity
-                        key={g.id}
-                        style={[
-                          styles.chip,
-                          assignGroupId === g.id && styles.chipActive,
-                        ]}
-                        onPress={() => setAssignGroupId(g.id)}
-                      >
-                        <Text
-                          style={[
-                            styles.chipText,
-                            assignGroupId === g.id && styles.chipTextActive,
-                          ]}
-                        >
-                          {g.name}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </>
-              )}
-
-              {assignRole === 'parent' && (
-                <>
-                  <Text style={styles.fieldLabel}>Enfant</Text>
-                  <View style={styles.chipRow}>
-                    {children.map((c) => (
-                      <TouchableOpacity
-                        key={c.id}
-                        style={[
-                          styles.chip,
-                          assignChildId === c.id && styles.chipActive,
-                        ]}
-                        onPress={() => setAssignChildId(c.id)}
-                      >
-                        <Text
-                          style={[
-                            styles.chipText,
-                            assignChildId === c.id && styles.chipTextActive,
-                          ]}
-                        >
-                          {c.firstName}
-                        </Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                </>
-              )}
-
-              <TouchableOpacity
-                style={[styles.primaryButton, assigning && styles.buttonDisabled]}
-                onPress={handleAssignRole}
-                disabled={assigning}
-              >
-                {assigning ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.primaryButtonText}>Confirmer</Text>
-                )}
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={() => setShowAssignModal(false)}
-              >
-                <Text style={styles.cancelButtonText}>Annuler</Text>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </View>
+      <Modal visible={showCreateTenantModal} animationType="slide" transparent>
+        <View style={styles.modalOverlay}><ScrollView contentContainerStyle={styles.modalScroll}><View style={styles.modalCard}>
+          <Text style={styles.modalTitle}>Créer une nouvelle crèche</Text>
+          <TextInput style={styles.input} placeholder="Nom de la crèche" value={newTenantName} onChangeText={setNewTenantName} />
+          <TextInput style={styles.input} placeholder="Adresse (optionnel)" value={newTenantAddress} onChangeText={setNewTenantAddress} />
+          <TouchableOpacity style={[styles.primaryButton, pending && styles.buttonDisabled]} onPress={handleCreateTenant} disabled={pending}><Text style={styles.primaryButtonText}>Créer</Text></TouchableOpacity>
+          <TouchableOpacity style={styles.cancelButton} onPress={() => setShowCreateTenantModal(false)}><Text style={styles.cancelButtonText}>Annuler</Text></TouchableOpacity>
+        </View></ScrollView></View>
       </Modal>
     </View>
   );

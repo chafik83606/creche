@@ -12,6 +12,24 @@ admin.initializeApp();
 const db = admin.firestore();
 const auth = admin.auth();
 
+function slugifyTenantId(value: string): string {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40);
+}
+
+function randomInviteCode(length = 8): string {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  for (let i = 0; i < length; i += 1) {
+    code += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return code;
+}
+
 // ─── Attribution des custom claims à l'inscription ───────────────────────────
 
 interface SetRoleRequest {
@@ -84,6 +102,228 @@ export const setUserRole = onCall<SetRoleRequest>(async (request) => {
   );
 
   return { success: true };
+});
+
+interface CreateTenantRequest {
+  name: string;
+  address?: string;
+  tenantId?: string;
+}
+
+/**
+ * Onboarding: le premier compte connecté peut créer sa crèche
+ * et devient automatiquement admin réseau.
+ */
+export const createTenant = onCall<CreateTenantRequest>(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Authentification requise.');
+  }
+
+  const uid = request.auth.uid;
+  const { name, address, tenantId } = request.data;
+  if (!name?.trim()) {
+    throw new HttpsError('invalid-argument', 'Nom de crèche requis.');
+  }
+
+  const userRecord = await auth.getUser(uid);
+  const existingClaims = (userRecord.customClaims ?? {}) as Partial<CustomClaims>;
+  const existingRole = existingClaims.role;
+
+  if (existingRole && existingRole !== 'network_admin') {
+    throw new HttpsError(
+      'permission-denied',
+      'Seul un compte sans rôle ou admin réseau peut créer une nouvelle crèche.'
+    );
+  }
+
+  const baseId = slugifyTenantId(tenantId || name) || `tenant-${Date.now()}`;
+  let finalTenantId = baseId;
+  let suffix = 2;
+  while ((await db.doc(`tenants/${finalTenantId}`).get()).exists) {
+    finalTenantId = `${baseId}-${suffix}`;
+    suffix += 1;
+  }
+
+  await db.doc(`tenants/${finalTenantId}`).set({
+    id: finalTenantId,
+    name: name.trim(),
+    address: address?.trim() || '',
+    subscriptionStatus: 'trial',
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  const tenantIds = Array.from(
+    new Set([...(existingClaims.tenantIds ?? []), finalTenantId])
+  );
+
+  await auth.setCustomUserClaims(uid, {
+    ...existingClaims,
+    role: existingRole ?? 'network_admin',
+    tenantIds,
+  });
+
+  await db.doc(`tenants/${finalTenantId}/members/${uid}`).set(
+    {
+      uid,
+      email: userRecord.email,
+      displayName: userRecord.displayName ?? userRecord.email,
+      role: existingRole ?? 'network_admin',
+      groupIds: [],
+      childIds: [],
+      fcmTokens: [],
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  return {
+    success: true,
+    tenantId: finalTenantId,
+    role: existingRole ?? 'network_admin',
+  };
+});
+
+interface CreateInvitationRequest {
+  tenantId: string;
+  email: string;
+  role: UserRole;
+  childId?: string;
+  groupIds?: string[];
+}
+
+export const createInvitation = onCall<CreateInvitationRequest>(async (request) => {
+  if (!request.auth) {
+    throw new HttpsError('unauthenticated', 'Authentification requise.');
+  }
+
+  const callerRole = request.auth.token.role as UserRole;
+  if (!['network_admin', 'director'].includes(callerRole)) {
+    throw new HttpsError('permission-denied', 'Rôle insuffisant.');
+  }
+
+  const { tenantId, email, role, childId, groupIds } = request.data;
+  if (!tenantId || !email?.trim()) {
+    throw new HttpsError('invalid-argument', 'tenantId et email requis.');
+  }
+  if (role === 'network_admin') {
+    throw new HttpsError('invalid-argument', 'Rôle network_admin non invitables par code.');
+  }
+  if (role === 'parent' && !childId) {
+    throw new HttpsError('invalid-argument', 'childId requis pour inviter un parent.');
+  }
+
+  const memberDoc = await db.doc(`tenants/${tenantId}/members/${request.auth.uid}`).get();
+  if (!memberDoc.exists) {
+    throw new HttpsError('permission-denied', 'Vous devez appartenir à la crèche ciblée.');
+  }
+
+  const inviteCode = randomInviteCode(8);
+  const inviteRef = db.collection(`tenants/${tenantId}/invitations`).doc();
+  const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * 14);
+
+  await inviteRef.set({
+    email: email.trim().toLowerCase(),
+    role,
+    childId: childId ?? null,
+    groupIds: groupIds ?? [],
+    inviteCode,
+    usedAt: null,
+    usedBy: null,
+    createdBy: request.auth.uid,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    expiresAt: admin.firestore.Timestamp.fromDate(expiresAt),
+  });
+
+  return { success: true, inviteCode, invitationId: inviteRef.id, expiresAt: expiresAt.toISOString() };
+});
+
+interface RegisterWithInviteRequest {
+  email: string;
+  password: string;
+  displayName: string;
+  inviteCode: string;
+}
+
+export const registerWithInvite = onCall<RegisterWithInviteRequest>(async (request) => {
+  const { email, password, displayName, inviteCode } = request.data;
+  if (!email?.trim() || !password || !displayName?.trim() || !inviteCode?.trim()) {
+    throw new HttpsError('invalid-argument', 'email, password, displayName et inviteCode requis.');
+  }
+
+  const normalizedEmail = email.trim().toLowerCase();
+  const normalizedCode = inviteCode.trim().toUpperCase();
+  const inviteSnap = await db
+    .collectionGroup('invitations')
+    .where('inviteCode', '==', normalizedCode)
+    .where('usedAt', '==', null)
+    .limit(1)
+    .get();
+
+  if (inviteSnap.empty) {
+    throw new HttpsError('not-found', 'Code d’invitation invalide ou déjà utilisé.');
+  }
+
+  const inviteDoc = inviteSnap.docs[0];
+  const inviteData = inviteDoc.data();
+  const inviteEmail = (inviteData.email as string | undefined)?.toLowerCase();
+  if (inviteEmail && inviteEmail !== normalizedEmail) {
+    throw new HttpsError('permission-denied', 'Ce code est réservé à une autre adresse email.');
+  }
+
+  const expiresAt = inviteData.expiresAt?.toDate?.();
+  if (expiresAt && expiresAt.getTime() < Date.now()) {
+    throw new HttpsError('failed-precondition', 'Code d’invitation expiré.');
+  }
+
+  const tenantId = inviteDoc.ref.parent.parent?.id;
+  if (!tenantId) {
+    throw new HttpsError('internal', 'Invitation invalide (tenant introuvable).');
+  }
+
+  const role = inviteData.role as UserRole;
+  const childId = inviteData.childId as string | null;
+  const groupIds = (inviteData.groupIds as string[] | undefined) ?? [];
+  const userRecord = await auth.createUser({
+    email: normalizedEmail,
+    password,
+    displayName: displayName.trim(),
+  });
+
+  const claims: CustomClaims = {
+    role,
+    tenantIds: [tenantId],
+    ...(role === 'educator' && groupIds.length > 0 && { groupIds }),
+    ...(role === 'parent' && childId && { childIds: [childId] }),
+  };
+  await auth.setCustomUserClaims(userRecord.uid, claims);
+
+  await db.doc(`tenants/${tenantId}/members/${userRecord.uid}`).set({
+    uid: userRecord.uid,
+    email: normalizedEmail,
+    displayName: displayName.trim(),
+    role,
+    groupIds: role === 'educator' ? groupIds : [],
+    childIds: role === 'parent' && childId ? [childId] : [],
+    fcmTokens: [],
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
+  if (role === 'parent' && childId) {
+    await db.doc(`tenants/${tenantId}/children/${childId}`).set(
+      { parentIds: admin.firestore.FieldValue.arrayUnion(userRecord.uid) },
+      { merge: true }
+    );
+  }
+
+  await inviteDoc.ref.update({
+    usedAt: admin.firestore.FieldValue.serverTimestamp(),
+    usedBy: userRecord.uid,
+  });
+
+  return { success: true, uid: userRecord.uid, tenantId, role };
 });
 
 // ─── Inscription parent via code d'invitation ────────────────────────────────

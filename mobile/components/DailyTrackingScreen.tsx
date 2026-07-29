@@ -221,8 +221,8 @@ export function DailyTrackingScreen({
         ) : todayMeals.length === 0 ? (
           <Text style={styles.emptyText}>
             {readOnly
-              ? "Aucun repas enregistré pour aujourd'hui. L'éducateur remplira le carnet pendant la journée."
-              : 'Aucun repas enregistré pour le moment.'}
+              ? "Aucune entrée du carnet pour aujourd'hui (repas, sieste, activités, santé). L'éducateur le remplira pendant la journée."
+              : 'Aucune entrée du carnet pour le moment.'}
           </Text>
         ) : (
           todayMeals.map((meal) => (

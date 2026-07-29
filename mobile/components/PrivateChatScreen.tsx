@@ -111,7 +111,8 @@ export function PrivateChatScreen({
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 160 : 0}
     >
       <Text style={styles.header}>Conversation — {recipientName}</Text>
 
@@ -119,6 +120,7 @@ export function PrivateChatScreen({
         data={messages}
         keyExtractor={(item) => item.id}
         style={styles.messageList}
+        keyboardShouldPersistTaps="handled"
         renderItem={({ item }) => {
           const isMine = item.senderId === uid;
           return (

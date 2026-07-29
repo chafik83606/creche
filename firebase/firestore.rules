@@ -71,7 +71,7 @@ service cloud.firestore {
 
     match /tenants/{tenantId} {
       allow read: if isMemberOf(tenantId);
-      allow create: if isNetworkAdmin();
+      allow create: if isAuthenticated();
       allow update: if isManagement() && isMemberOf(tenantId);
       allow delete: if isNetworkAdmin();
 
