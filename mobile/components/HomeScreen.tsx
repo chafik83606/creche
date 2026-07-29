@@ -247,16 +247,8 @@ function EducatorHome({
       />
       <View style={styles.tabBar}>
         <TabButton label="Carnet" active={tab === 'carnet'} onPress={() => setTab('carnet')} />
-        <TabButton
-          label="Annonces"
-          active={tab === 'annonces'}
-          onPress={() => setTab('annonces')}
-        />
-        <TabButton
-          label="Messages"
-          active={tab === 'messages'}
-          onPress={() => setTab('messages')}
-        />
+        <TabButton label="Annonces" active={tab === 'annonces'} onPress={() => setTab('annonces')} />
+        <TabButton label="Messages" active={tab === 'messages'} onPress={() => setTab('messages')} />
       </View>
       {tab === 'carnet' && (
         <DailyTrackingScreen
@@ -371,7 +363,7 @@ function ParentHome({
   if (!selectedChild) {
     return (
       <View style={styles.centered}>
-        <Text style={styles.noRoleText}>Aucun enfant associé à ce compte.</Text>
+        <Text style={styles.noRoleText}>Aucun enfant associe a ce compte.</Text>
       </View>
     );
   }
@@ -385,21 +377,9 @@ function ParentHome({
       />
       <View style={styles.tabBar}>
         <TabButton label="Carnet" active={tab === 'carnet'} onPress={() => setTab('carnet')} />
-        <TabButton
-          label="Annonces"
-          active={tab === 'annonces'}
-          onPress={() => setTab('annonces')}
-        />
-        <TabButton
-          label="Messages"
-          active={tab === 'messages'}
-          onPress={() => setTab('messages')}
-        />
-        <TabButton
-          label="Consent."
-          active={tab === 'consentements'}
-          onPress={() => setTab('consentements')}
-        />
+        <TabButton label="Annonces" active={tab === 'annonces'} onPress={() => setTab('annonces')} />
+        <TabButton label="Messages" active={tab === 'messages'} onPress={() => setTab('messages')} />
+        <TabButton label="Consent." active={tab === 'consentements'} onPress={() => setTab('consentements')} />
       </View>
       {tab === 'carnet' && (
         <DailyTrackingScreen
@@ -433,42 +413,91 @@ function ParentHome({
   );
 }
 
-function ManagementHome({
-  role,
-  tenantId,
-}: {
-  role: UserRole;
-  tenantId: string;
-}) {
-  const [tab, setTab] = useState<'annonces' | 'infos'>('annonces');
+function DirectorHome({ tenantId }: { tenantId: string }) {
+  type DirTab = 'annonces' | 'carnet' | 'messages';
+  const [tab, setTab] = useState<DirTab>('annonces');
+  const [children, setChildren] = useState<ChildSummary[]>([]);
+  const [selectedChildId, setSelectedChildId] = useState('');
+  const [membersList, setMembersList] = useState<{ uid: string; displayName: string }[]>([]);
+  const [selectedMemberId, setSelectedMemberId] = useState('');
+  const [dirLoading, setDirLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setDirLoading(true);
+      const childrenSnap = await getDocs(
+        query(collection(db, paths.children(tenantId)), where('enrollmentStatus', '==', 'active'))
+      );
+      const cList = childrenSnap.docs.map((d) => {
+        const data = d.data();
+        return { id: d.id, firstName: data.firstName ?? '', lastName: data.lastName ?? '', groupId: data.groupId, parentIds: data.parentIds ?? [] } as ChildSummary;
+      });
+      const membersSnap = await getDocs(collection(db, paths.members(tenantId)));
+      const mList = membersSnap.docs
+        .map((d) => ({ uid: d.id, displayName: d.data().displayName ?? d.data().email ?? d.id }))
+        .filter((m) => m.uid !== auth.currentUser?.uid);
+      if (cancelled) return;
+      setChildren(cList);
+      setSelectedChildId(cList[0]?.id ?? '');
+      setMembersList(mList);
+      setSelectedMemberId(mList[0]?.uid ?? '');
+      setDirLoading(false);
+    })();
+    return () => { cancelled = true; };
+  }, [tenantId]);
+
+  const selectedChild = useMemo(
+    () => children.find((c) => c.id === selectedChildId),
+    [children, selectedChildId]
+  );
+  const selectedMember = useMemo(
+    () => membersList.find((m) => m.uid === selectedMemberId),
+    [membersList, selectedMemberId]
+  );
+
+  if (dirLoading) {
+    return <View style={styles.centered}><ActivityIndicator color="#4a90d9" /></View>;
+  }
 
   return (
     <View style={styles.flex}>
       <View style={styles.tabBar}>
-        <TabButton
-          label="Annonces"
-          active={tab === 'annonces'}
-          onPress={() => setTab('annonces')}
-        />
-        <TabButton
-          label="Infos"
-          active={tab === 'infos'}
-          onPress={() => setTab('infos')}
-        />
+        <TabButton label="Annonces" active={tab === 'annonces'} onPress={() => setTab('annonces')} />
+        <TabButton label="Carnet" active={tab === 'carnet'} onPress={() => setTab('carnet')} />
+        <TabButton label="Messages" active={tab === 'messages'} onPress={() => setTab('messages')} />
       </View>
-      {tab === 'annonces' && (
-        <AnnouncementsScreen tenantId={tenantId} canSend />
+
+      {tab === 'annonces' && <AnnouncementsScreen tenantId={tenantId} canSend />}
+
+      {tab === 'carnet' && (
+        <View style={styles.flex}>
+          <ChildPicker items={children} selectedId={selectedChildId} onSelect={setSelectedChildId} />
+          {selectedChild ? (
+            <DailyTrackingScreen tenantId={tenantId} childId={selectedChild.id} childName={childDisplayName(selectedChild)} readOnly />
+          ) : (
+            <View style={styles.centered}><Text style={styles.noRoleText}>Aucun enfant inscrit.</Text></View>
+          )}
+        </View>
       )}
-      {tab === 'infos' && (
-        <ScrollView style={styles.managementContainer}>
-          <Text style={styles.managementTitle}>
-            {role === 'network_admin' ? 'Admin réseau' : 'Directeur'}
-          </Text>
-          <Text style={styles.managementText}>
-            Utilisez l’onglet Annonces pour envoyer un message à tous les parents
-            de la crèche. Le tableau de bord de gestion complet arrivera ensuite.
-          </Text>
-        </ScrollView>
+
+      {tab === 'messages' && (
+        <View style={styles.flex}>
+          {membersList.length > 0 && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.childPicker} contentContainerStyle={styles.childPickerContent}>
+              {membersList.map((m) => (
+                <TouchableOpacity key={m.uid} style={[styles.childChip, m.uid === selectedMemberId && styles.childChipActive]} onPress={() => setSelectedMemberId(m.uid)}>
+                  <Text style={[styles.childChipText, m.uid === selectedMemberId && styles.childChipTextActive]}>{m.displayName.split(' ')[0]}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
+          {selectedMember ? (
+            <PrivateChatScreen tenantId={tenantId} childId={selectedChildId || 'general'} recipientId={selectedMember.uid} recipientName={selectedMember.displayName} />
+          ) : (
+            <View style={styles.centered}><Text style={styles.noRoleText}>Aucun membre dans la creche.</Text></View>
+          )}
+        </View>
       )}
     </View>
   );
@@ -485,7 +514,7 @@ export function HomeScreen() {
     if (!user) return;
 
     registerForPushNotifications(tenantId).catch((err) => {
-      console.warn('Enregistrement push échoué:', err);
+      console.warn('Enregistrement push echoue:', err);
     });
 
     return addNotificationListeners();
@@ -494,9 +523,9 @@ export function HomeScreen() {
   return (
     <View style={styles.flex}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Crèche</Text>
+        <Text style={styles.headerTitle}>Creche</Text>
         <TouchableOpacity onPress={() => signOut(auth)}>
-          <Text style={styles.logout}>Déconnexion</Text>
+          <Text style={styles.logout}>Deconnexion</Text>
         </TouchableOpacity>
       </View>
       <Text style={styles.welcome}>
@@ -510,7 +539,7 @@ export function HomeScreen() {
         <ParentHome tenantId={tenantId} childIds={childIds} />
       )}
       {role === 'network_admin' && <AdminScreen tenantId={tenantId} />}
-      {role === 'director' && <ManagementHome role={role} tenantId={tenantId} />}
+      {role === 'director' && <DirectorHome tenantId={tenantId} />}
       {!role && <OnboardingScreen onDone={() => {}} />}
     </View>
   );
@@ -565,7 +594,4 @@ const styles = StyleSheet.create({
   tabTextActive: { color: '#4a90d9', fontWeight: '600' },
   noRole: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
   noRoleText: { textAlign: 'center', color: '#666', fontSize: 15, lineHeight: 22 },
-  managementContainer: { flex: 1 },
-  managementTitle: { fontSize: 22, fontWeight: '700', padding: 16, color: '#1a1a2e' },
-  managementText: { paddingHorizontal: 16, color: '#666', marginBottom: 8 },
 });
