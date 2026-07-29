@@ -83,6 +83,36 @@ function AudioMessagePlayer({
   );
 }
 
+const VOICE_RECORDING = {
+  ...RecordingPresets.HIGH_QUALITY,
+  numberOfChannels: 1,
+  bitRate: 128000,
+};
+
+async function enableRecordingAudioMode() {
+  // Tous les champs sont explicites : sur iOS les défauts natifs
+  // (allowsRecording=false, playsInSilentMode=false) bloquent sinon l'enregistrement.
+  await setAudioModeAsync({
+    allowsRecording: true,
+    playsInSilentMode: true,
+    interruptionMode: 'doNotMix',
+    shouldPlayInBackground: false,
+    shouldRouteThroughEarpiece: false,
+    allowsBackgroundRecording: false,
+  });
+}
+
+async function disableRecordingAudioMode() {
+  await setAudioModeAsync({
+    allowsRecording: false,
+    playsInSilentMode: true,
+    interruptionMode: 'mixWithOthers',
+    shouldPlayInBackground: false,
+    shouldRouteThroughEarpiece: false,
+    allowsBackgroundRecording: false,
+  });
+}
+
 function ChatComposer({
   uploading,
   text,
@@ -105,14 +135,16 @@ function ChatComposer({
   ) => Promise<void>;
   bottomPad: number;
 }) {
-  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const recorder = useAudioRecorder(VOICE_RECORDING);
   const recorderState = useAudioRecorderState(recorder);
   const [recordingMs, setRecordingMs] = useState(0);
+  const [starting, setStarting] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
+      void disableRecordingAudioMode().catch(() => undefined);
     };
   }, []);
 
@@ -128,37 +160,79 @@ function ChatComposer({
   }, [recorderState.isRecording]);
 
   async function startRecording() {
+    if (starting || recorderState.isRecording) return;
+    setStarting(true);
     try {
-      const permission = await AudioModule.requestRecordingPermissionsAsync();
+      const permission = await requestRecordingPermissionsAsync();
       if (!permission.granted) {
-        Alert.alert('Permission requise', 'Autorisez le micro pour envoyer un message audio.');
+        Alert.alert(
+          'Permission requise',
+          'Autorisez le micro pour envoyer un message audio.',
+          [
+            { text: 'Annuler', style: 'cancel' },
+            { text: 'Ouvrir Réglages', onPress: () => Linking.openSettings() },
+          ]
+        );
         return;
       }
-      await setAudioModeAsync({
-        allowsRecording: true,
-        playsInSilentMode: true,
-      });
+
+      await enableRecordingAudioMode();
       setRecordingMs(0);
-      await recorder.prepareToRecordAsync();
+      await recorder.prepareToRecordAsync(VOICE_RECORDING);
       recorder.record();
     } catch (err) {
-      console.error(err);
-      Alert.alert('Erreur', 'Impossible de démarrer l’enregistrement.');
+      console.error('startRecording', err);
+      const raw = err instanceof Error ? err.message : String(err);
+      const denied =
+        /permission|denied|not granted/i.test(raw) ||
+        raw.includes('AudioPermissions');
+      const disabled = /Recording not allowed|RecordingDisabled|allowsRecording/i.test(raw);
+
+      if (denied) {
+        Alert.alert(
+          'Permission micro',
+          'Le micro est refusé. Activez-le dans Réglages > Zibou > Microphone.',
+          [
+            { text: 'Annuler', style: 'cancel' },
+            { text: 'Ouvrir Réglages', onPress: () => Linking.openSettings() },
+          ]
+        );
+      } else if (disabled) {
+        Alert.alert(
+          'Erreur micro',
+          'L’enregistrement audio n’est pas activé sur cet appareil. Fermez les autres apps audio puis réessayez.'
+        );
+      } else {
+        Alert.alert('Erreur', 'Impossible de démarrer l’enregistrement.');
+      }
+
+      try {
+        await disableRecordingAudioMode();
+      } catch {
+        // ignore
+      }
+    } finally {
+      setStarting(false);
     }
   }
 
   async function stopRecording(send: boolean) {
     try {
       await recorder.stop();
-      await setAudioModeAsync({ allowsRecording: false, playsInSilentMode: true });
       const uri = recorder.uri;
       setRecordingMs(0);
+      await disableRecordingAudioMode();
       if (send && uri) {
         await onUploadUri(uri, 'audio', 'audio/m4a', 'm4a');
       }
     } catch (err) {
       console.error(err);
       Alert.alert('Erreur', 'Impossible de finaliser l’audio.');
+      try {
+        await disableRecordingAudioMode();
+      } catch {
+        // ignore
+      }
     }
   }
 
@@ -198,10 +272,14 @@ function ChatComposer({
       <TouchableOpacity
         style={styles.attachButton}
         onPress={startRecording}
-        disabled={uploading}
+        disabled={uploading || starting}
         accessibilityLabel="Enregistrer un message audio"
       >
-        <Text style={styles.micButtonText}>🎤</Text>
+        {starting ? (
+          <ActivityIndicator size="small" color="#4a90d9" />
+        ) : (
+          <Text style={styles.micButtonText}>🎤</Text>
+        )}
       </TouchableOpacity>
       <TextInput
         style={styles.textInput}
