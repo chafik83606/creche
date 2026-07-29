@@ -18,36 +18,41 @@ import {
   doc,
   setDoc,
   serverTimestamp,
-  where,
 } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { paths, formatFirestoreDate } from '@creche/shared';
 import type { Announcement } from '@creche/shared';
 
+type Audience = 'all' | 'group';
+
 interface Props {
   tenantId: string;
+  /** Si fourni, permet d’envoyer aussi au groupe uniquement. */
   groupId?: string;
+  groupName?: string;
   canSend?: boolean;
 }
 
-export function AnnouncementsScreen({ tenantId, groupId, canSend = false }: Props) {
+export function AnnouncementsScreen({
+  tenantId,
+  groupId,
+  groupName,
+  canSend = false,
+}: Props) {
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [requiresAck, setRequiresAck] = useState(false);
+  const [audience, setAudience] = useState<Audience>('all');
   const [showForm, setShowForm] = useState(false);
 
   useEffect(() => {
-    const q = groupId
-      ? query(
-          collection(db, paths.announcements(tenantId)),
-          where('groupId', '==', groupId),
-          orderBy('createdAt', 'desc')
-        )
-      : query(
-          collection(db, paths.announcements(tenantId)),
-          orderBy('createdAt', 'desc')
-        );
+    // Les parents et le staff voient toutes les annonces du tenant
+    // (globales + éventuelles annonces de groupe).
+    const q = query(
+      collection(db, paths.announcements(tenantId)),
+      orderBy('createdAt', 'desc')
+    );
 
     const unsubscribe = onSnapshot(q, (snap) => {
       setAnnouncements(
@@ -56,11 +61,14 @@ export function AnnouncementsScreen({ tenantId, groupId, canSend = false }: Prop
     });
 
     return unsubscribe;
-  }, [tenantId, groupId]);
+  }, [tenantId]);
 
   async function sendAnnouncement() {
     const user = auth.currentUser;
     if (!user || !title.trim() || !body.trim()) return;
+
+    const targetGroupId =
+      audience === 'group' && groupId ? groupId : null;
 
     try {
       await addDoc(collection(db, paths.announcements(tenantId)), {
@@ -69,7 +77,7 @@ export function AnnouncementsScreen({ tenantId, groupId, canSend = false }: Prop
         body: body.trim(),
         senderId: user.uid,
         senderName: user.displayName ?? user.email,
-        groupId: groupId ?? null,
+        groupId: targetGroupId,
         requiresAck,
         createdAt: serverTimestamp(),
       });
@@ -77,10 +85,16 @@ export function AnnouncementsScreen({ tenantId, groupId, canSend = false }: Prop
       setTitle('');
       setBody('');
       setRequiresAck(false);
+      setAudience('all');
       setShowForm(false);
-      Alert.alert('Envoyé', 'Annonce envoyée à tous les parents.');
+      Alert.alert(
+        'Envoyé',
+        targetGroupId
+          ? `Message envoyé aux parents du groupe${groupName ? ` « ${groupName} »` : ''}.`
+          : 'Message envoyé à tous les parents de la crèche.'
+      );
     } catch (error) {
-      Alert.alert('Erreur', 'Impossible d\'envoyer l\'annonce.');
+      Alert.alert('Erreur', "Impossible d'envoyer le message.");
       console.error(error);
     }
   }
@@ -100,17 +114,58 @@ export function AnnouncementsScreen({ tenantId, groupId, canSend = false }: Prop
     <View style={styles.container}>
       {canSend && (
         <>
+          <Text style={styles.sectionHint}>
+            Envoyez un message collectif aux parents (visible dans Annonces + notification).
+          </Text>
           <TouchableOpacity
             style={styles.newButton}
             onPress={() => setShowForm(!showForm)}
           >
             <Text style={styles.newButtonText}>
-              {showForm ? 'Annuler' : '+ Nouvelle annonce'}
+              {showForm ? 'Annuler' : '+ Message à tous les parents'}
             </Text>
           </TouchableOpacity>
 
           {showForm && (
             <View style={styles.form}>
+              {groupId ? (
+                <View style={styles.audienceBlock}>
+                  <Text style={styles.label}>Destinataires</Text>
+                  <View style={styles.chipRow}>
+                    <TouchableOpacity
+                      style={[styles.chip, audience === 'all' && styles.chipActive]}
+                      onPress={() => setAudience('all')}
+                    >
+                      <Text
+                        style={[
+                          styles.chipText,
+                          audience === 'all' && styles.chipTextActive,
+                        ]}
+                      >
+                        Tous les parents
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.chip, audience === 'group' && styles.chipActive]}
+                      onPress={() => setAudience('group')}
+                    >
+                      <Text
+                        style={[
+                          styles.chipText,
+                          audience === 'group' && styles.chipTextActive,
+                        ]}
+                      >
+                        {groupName ? `Groupe ${groupName}` : 'Mon groupe'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                <Text style={styles.audienceNote}>
+                  Destinataires : tous les parents de la crèche
+                </Text>
+              )}
+
               <TextInput
                 style={styles.input}
                 placeholder="Titre"
@@ -119,7 +174,7 @@ export function AnnouncementsScreen({ tenantId, groupId, canSend = false }: Prop
               />
               <TextInput
                 style={[styles.input, styles.textArea]}
-                placeholder="Message"
+                placeholder="Votre message aux parents..."
                 value={body}
                 onChangeText={setBody}
                 multiline
@@ -129,7 +184,9 @@ export function AnnouncementsScreen({ tenantId, groupId, canSend = false }: Prop
                 <Switch value={requiresAck} onValueChange={setRequiresAck} />
               </View>
               <TouchableOpacity style={styles.sendButton} onPress={sendAnnouncement}>
-                <Text style={styles.sendButtonText}>Envoyer</Text>
+                <Text style={styles.sendButtonText}>
+                  {audience === 'group' ? 'Envoyer au groupe' : 'Envoyer à tous les parents'}
+                </Text>
               </TouchableOpacity>
             </View>
           )}
@@ -141,7 +198,14 @@ export function AnnouncementsScreen({ tenantId, groupId, canSend = false }: Prop
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>{item.title}</Text>
+            <View style={styles.cardHeader}>
+              <Text style={styles.cardTitle}>{item.title}</Text>
+              {item.groupId ? (
+                <Text style={styles.badgeGroup}>Groupe</Text>
+              ) : (
+                <Text style={styles.badgeAll}>Tous</Text>
+              )}
+            </View>
             <Text style={styles.cardBody}>{item.body}</Text>
             <Text style={styles.cardMeta}>
               {item.senderName} — {formatFirestoreDate(item.createdAt)}
@@ -166,6 +230,12 @@ export function AnnouncementsScreen({ tenantId, groupId, canSend = false }: Prop
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8f9fa', padding: 16 },
+  sectionHint: {
+    fontSize: 13,
+    color: '#666',
+    marginBottom: 10,
+    lineHeight: 18,
+  },
   newButton: {
     backgroundColor: '#4a90d9',
     borderRadius: 10,
@@ -180,6 +250,26 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 16,
   },
+  audienceBlock: { marginBottom: 12 },
+  audienceNote: {
+    fontSize: 13,
+    color: '#4a90d9',
+    fontWeight: '500',
+    marginBottom: 12,
+  },
+  label: { fontSize: 14, fontWeight: '500', color: '#444', marginBottom: 8 },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  chip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#f0f0f0',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  chipActive: { backgroundColor: '#4a90d9', borderColor: '#4a90d9' },
+  chipText: { fontSize: 13, color: '#555' },
+  chipTextActive: { color: '#fff', fontWeight: '600' },
   input: {
     borderWidth: 1,
     borderColor: '#ddd',
@@ -213,7 +303,33 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 1,
   },
-  cardTitle: { fontSize: 16, fontWeight: '600', color: '#1a1a2e' },
+  cardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+  },
+  cardTitle: { flex: 1, fontSize: 16, fontWeight: '600', color: '#1a1a2e' },
+  badgeAll: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#27ae60',
+    backgroundColor: '#eafaf1',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  badgeGroup: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#4a90d9',
+    backgroundColor: '#eaf2fb',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
   cardBody: { fontSize: 14, color: '#444', marginTop: 6, lineHeight: 20 },
   cardMeta: { fontSize: 12, color: '#999', marginTop: 8 },
   ackButton: {

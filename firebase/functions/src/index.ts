@@ -15,7 +15,8 @@ const auth = admin.auth();
 // ─── Attribution des custom claims à l'inscription ───────────────────────────
 
 interface SetRoleRequest {
-  uid: string;
+  uid?: string;
+  email?: string;
   role: UserRole;
   tenantId: string;
   groupIds?: string[];
@@ -36,9 +37,24 @@ export const setUserRole = onCall<SetRoleRequest>(async (request) => {
     throw new HttpsError('permission-denied', 'Rôle insuffisant.');
   }
 
-  const { uid, role, tenantId, groupIds, childIds } = request.data;
+  const { role, tenantId, groupIds, childIds } = request.data;
+  let { uid, email } = request.data;
 
-  const existingClaims = (await auth.getUser(uid)).customClaims ?? {};
+  if (role === 'network_admin' && callerRole !== 'network_admin') {
+    throw new HttpsError('permission-denied', 'Seul un admin réseau peut attribuer ce rôle.');
+  }
+
+  if (!uid && email) {
+    const userRecord = await auth.getUserByEmail(email.trim().toLowerCase());
+    uid = userRecord.uid;
+  }
+
+  if (!uid) {
+    throw new HttpsError('invalid-argument', 'uid ou email requis.');
+  }
+
+  const targetUser = await auth.getUser(uid);
+  const existingClaims = targetUser.customClaims ?? {};
   const tenantIds: string[] = existingClaims.tenantIds ?? [];
   if (!tenantIds.includes(tenantId)) {
     tenantIds.push(tenantId);
@@ -56,9 +72,12 @@ export const setUserRole = onCall<SetRoleRequest>(async (request) => {
   await db.doc(`tenants/${tenantId}/members/${uid}`).set(
     {
       uid,
+      email: targetUser.email,
+      displayName: targetUser.displayName ?? targetUser.email,
       role,
       groupIds: groupIds ?? [],
       childIds: childIds ?? [],
+      fcmTokens: [],
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     },
     { merge: true }

@@ -8,6 +8,7 @@ firebase/functions/lib/
 .env
 .env.*
 !.env.example
+mobile/.keystore-pass.tmp
 firebase-debug.log
 firebase-debug.*.log
 firestore-debug.log
@@ -17,6 +18,8 @@ firebase/service-account.json
 **/service-account*.json
 *.keystore
 *.jks
+mobile/android/keystore.properties
+**/keystore.properties
 ios_distribution_private_key.pem
 ios_distribution_private_key
 .idea/

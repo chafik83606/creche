@@ -1,83 +1,100 @@
-import React, { useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  ScrollView,
+  ActivityIndicator,
+} from 'react-native';
 import { signOut } from 'firebase/auth';
-import { auth } from '../lib/firebase';
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  where,
+} from 'firebase/firestore';
+import { auth, db } from '../lib/firebase';
 import { useAuth } from '../hooks/useAuth';
 import { DailyTrackingScreen } from './DailyTrackingScreen';
 import { AnnouncementsScreen } from './AnnouncementsScreen';
 import { ConsentScreen } from './ConsentScreen';
+import { ConsentManageScreen } from './ConsentManageScreen';
+import { PrivateChatScreen } from './PrivateChatScreen';
+import { AdminScreen } from './AdminScreen';
 import { registerForPushNotifications, addNotificationListeners } from '../lib/notifications';
+import { paths } from '@creche/shared';
 import type { UserRole } from '@creche/shared';
+import { isConsentActive, loadConsent } from '../lib/consents';
 
-// IDs de démo — à remplacer par la sélection dynamique en production
-const DEMO_TENANT_ID = 'demo-creche';
-const DEMO_CHILD_ID = 'demo-child-001';
-const DEMO_CHILD_NAME = 'Léa Martin';
+const FALLBACK_TENANT_ID = 'demo-creche';
+const FALLBACK_CHILD_ID = 'demo-child-001';
+const FALLBACK_EDUCATOR = { id: 'demo-educator-001', name: 'Marie Dupont' };
+const FALLBACK_PARENT = { id: 'demo-parent-001', name: 'Sophie Martin' };
 
-type Tab = 'carnet' | 'annonces' | 'consent';
+type Tab = 'carnet' | 'annonces' | 'messages' | 'consentements';
 
-function EducatorHome() {
-  const [tab, setTab] = React.useState<Tab>('carnet');
+type ChildSummary = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  groupId?: string;
+  parentIds?: string[];
+};
 
-  return (
-    <View style={styles.flex}>
-      <View style={styles.tabBar}>
-        <TabButton label="Carnet" active={tab === 'carnet'} onPress={() => setTab('carnet')} />
-        <TabButton label="Annonces" active={tab === 'annonces'} onPress={() => setTab('annonces')} />
-      </View>
-      {tab === 'carnet' && (
-        <DailyTrackingScreen
-          tenantId={DEMO_TENANT_ID}
-          childId={DEMO_CHILD_ID}
-          childName={DEMO_CHILD_NAME}
-        />
-      )}
-      {tab === 'annonces' && (
-        <AnnouncementsScreen tenantId={DEMO_TENANT_ID} canSend />
-      )}
-    </View>
-  );
+type ChatPeer = { id: string; name: string };
+
+function childDisplayName(child: ChildSummary) {
+  return `${child.firstName} ${child.lastName}`.trim();
 }
 
-function ParentHome() {
-  const [tab, setTab] = React.useState<Tab>('carnet');
-  const [consentDone, setConsentDone] = React.useState(false);
-
-  if (!consentDone) {
-    return (
-      <ConsentScreen
-        tenantId={DEMO_TENANT_ID}
-        childId={DEMO_CHILD_ID}
-        onComplete={() => setConsentDone(true)}
-      />
-    );
-  }
+function ChildPicker({
+  items,
+  selectedId,
+  onSelect,
+}: {
+  items: ChildSummary[];
+  selectedId: string;
+  onSelect: (id: string) => void;
+}) {
+  if (items.length <= 1) return null;
 
   return (
-    <View style={styles.flex}>
-      <View style={styles.tabBar}>
-        <TabButton label="Annonces" active={tab === 'annonces'} onPress={() => setTab('annonces')} />
-      </View>
-      {tab === 'annonces' && <AnnouncementsScreen tenantId={DEMO_TENANT_ID} />}
-    </View>
-  );
-}
-
-function ManagementHome({ role }: { role: UserRole }) {
-  return (
-    <ScrollView style={styles.managementContainer}>
-      <Text style={styles.managementTitle}>
-        {role === 'network_admin' ? 'Admin réseau' : 'Directeur'}
-      </Text>
-      <Text style={styles.managementText}>
-        Tableau de bord de gestion — à compléter pour le MVP.
-      </Text>
-      <AnnouncementsScreen tenantId={DEMO_TENANT_ID} canSend />
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={styles.childPicker}
+      contentContainerStyle={styles.childPickerContent}
+    >
+      {items.map((child) => {
+        const active = child.id === selectedId;
+        return (
+          <TouchableOpacity
+            key={child.id}
+            style={[styles.childChip, active && styles.childChipActive]}
+            onPress={() => onSelect(child.id)}
+          >
+            <Text style={[styles.childChipText, active && styles.childChipTextActive]}>
+              {child.firstName}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
     </ScrollView>
   );
 }
 
-function TabButton({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+function TabButton({
+  label,
+  active,
+  onPress,
+}: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+}) {
   return (
     <TouchableOpacity
       style={[styles.tab, active && styles.tabActive]}
@@ -88,18 +105,390 @@ function TabButton({ label, active, onPress }: { label: string; active: boolean;
   );
 }
 
+async function fetchChildrenByIds(
+  tenantId: string,
+  childIds: string[]
+): Promise<ChildSummary[]> {
+  const results = await Promise.all(
+    childIds.map(async (id) => {
+      const snap = await getDoc(doc(db, paths.child(tenantId, id)));
+      if (!snap.exists()) return null;
+      const data = snap.data();
+      return {
+        id: snap.id,
+        firstName: data.firstName ?? 'Enfant',
+        lastName: data.lastName ?? '',
+        groupId: data.groupId,
+        parentIds: data.parentIds ?? [],
+      } as ChildSummary;
+    })
+  );
+  return results.filter((c): c is ChildSummary => c != null);
+}
+
+async function fetchChildrenForGroups(
+  tenantId: string,
+  groupIds: string[]
+): Promise<ChildSummary[]> {
+  if (groupIds.length === 0) return [];
+  const q = query(
+    collection(db, paths.children(tenantId)),
+    where('groupId', 'in', groupIds.slice(0, 10))
+  );
+  const snap = await getDocs(q);
+  return snap.docs.map((d) => {
+    const data = d.data();
+    return {
+      id: d.id,
+      firstName: data.firstName ?? 'Enfant',
+      lastName: data.lastName ?? '',
+      groupId: data.groupId,
+      parentIds: data.parentIds ?? [],
+    } as ChildSummary;
+  });
+}
+
+async function resolveEducatorPeer(
+  tenantId: string,
+  child: ChildSummary | undefined
+): Promise<ChatPeer> {
+  if (!child?.groupId) return FALLBACK_EDUCATOR;
+  const groupSnap = await getDoc(doc(db, paths.group(tenantId, child.groupId)));
+  const educatorId = groupSnap.data()?.educatorIds?.[0] as string | undefined;
+  if (!educatorId) return FALLBACK_EDUCATOR;
+  const memberSnap = await getDoc(doc(db, paths.member(tenantId, educatorId)));
+  return {
+    id: educatorId,
+    name: memberSnap.data()?.displayName ?? FALLBACK_EDUCATOR.name,
+  };
+}
+
+async function resolveParentPeer(
+  tenantId: string,
+  child: ChildSummary | undefined
+): Promise<ChatPeer> {
+  const parentId = child?.parentIds?.[0];
+  if (!parentId) return FALLBACK_PARENT;
+  const memberSnap = await getDoc(doc(db, paths.member(tenantId, parentId)));
+  return {
+    id: parentId,
+    name: memberSnap.data()?.displayName ?? FALLBACK_PARENT.name,
+  };
+}
+
+function EducatorHome({
+  tenantId,
+  groupIds,
+}: {
+  tenantId: string;
+  groupIds: string[];
+}) {
+  const [tab, setTab] = useState<Tab>('carnet');
+  const [children, setChildren] = useState<ChildSummary[]>([]);
+  const [selectedChildId, setSelectedChildId] = useState('');
+  const [chatPeer, setChatPeer] = useState<ChatPeer>(FALLBACK_PARENT);
+  const [groupName, setGroupName] = useState<string | undefined>();
+  const [loading, setLoading] = useState(true);
+
+  const primaryGroupId = groupIds[0];
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const list = await fetchChildrenForGroups(tenantId, groupIds);
+      const resolved =
+        list.length > 0
+          ? list
+          : await fetchChildrenByIds(tenantId, [FALLBACK_CHILD_ID]);
+
+      let name: string | undefined;
+      if (primaryGroupId) {
+        const groupSnap = await getDoc(doc(db, paths.group(tenantId, primaryGroupId)));
+        name = groupSnap.data()?.name;
+      }
+
+      if (cancelled) return;
+      setChildren(resolved);
+      setSelectedChildId(resolved[0]?.id ?? FALLBACK_CHILD_ID);
+      setGroupName(name);
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, groupIds.join('|'), primaryGroupId]);
+
+  const selectedChild = useMemo(
+    () => children.find((c) => c.id === selectedChildId) ?? children[0],
+    [children, selectedChildId]
+  );
+
+  useEffect(() => {
+    if (!selectedChild) return;
+    resolveParentPeer(tenantId, selectedChild).then(setChatPeer);
+  }, [tenantId, selectedChild?.id]);
+
+  if (loading || !selectedChild) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator color="#4a90d9" />
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.flex}>
+      <ChildPicker
+        items={children}
+        selectedId={selectedChild.id}
+        onSelect={setSelectedChildId}
+      />
+      <View style={styles.tabBar}>
+        <TabButton label="Carnet" active={tab === 'carnet'} onPress={() => setTab('carnet')} />
+        <TabButton
+          label="Annonces"
+          active={tab === 'annonces'}
+          onPress={() => setTab('annonces')}
+        />
+        <TabButton
+          label="Messages"
+          active={tab === 'messages'}
+          onPress={() => setTab('messages')}
+        />
+      </View>
+      {tab === 'carnet' && (
+        <DailyTrackingScreen
+          tenantId={tenantId}
+          childId={selectedChild.id}
+          childName={childDisplayName(selectedChild)}
+        />
+      )}
+      {tab === 'annonces' && (
+        <AnnouncementsScreen
+          tenantId={tenantId}
+          canSend
+          groupId={primaryGroupId}
+          groupName={groupName}
+        />
+      )}
+      {tab === 'messages' && (
+        <PrivateChatScreen
+          tenantId={tenantId}
+          childId={selectedChild.id}
+          recipientId={chatPeer.id}
+          recipientName={chatPeer.name}
+        />
+      )}
+    </View>
+  );
+}
+
+function ParentHome({
+  tenantId,
+  childIds,
+}: {
+  tenantId: string;
+  childIds: string[];
+}) {
+  const [tab, setTab] = useState<Tab>('carnet');
+  const [consentDone, setConsentDone] = useState(false);
+  const [consentChecked, setConsentChecked] = useState(false);
+  const [children, setChildren] = useState<ChildSummary[]>([]);
+  const [selectedChildId, setSelectedChildId] = useState('');
+  const [chatPeer, setChatPeer] = useState<ChatPeer>(FALLBACK_EDUCATOR);
+  const [loading, setLoading] = useState(true);
+
+  const ids = childIds.length > 0 ? childIds : [FALLBACK_CHILD_ID];
+  const uid = auth.currentUser?.uid;
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      const list = await fetchChildrenByIds(tenantId, ids);
+      if (cancelled) return;
+      setChildren(list);
+      setSelectedChildId((prev) => prev || list[0]?.id || FALLBACK_CHILD_ID);
+      setLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, ids.join('|')]);
+
+  const selectedChild = useMemo(
+    () => children.find((c) => c.id === selectedChildId) ?? children[0],
+    [children, selectedChildId]
+  );
+
+  useEffect(() => {
+    if (!selectedChild) return;
+    resolveEducatorPeer(tenantId, selectedChild).then(setChatPeer);
+  }, [tenantId, selectedChild?.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!uid || !selectedChild) {
+        setConsentChecked(true);
+        return;
+      }
+      setConsentChecked(false);
+      try {
+        const gdpr = await loadConsent(tenantId, uid, selectedChild.id, 'gdpr_data');
+        if (!cancelled) {
+          setConsentDone(isConsentActive(gdpr));
+        }
+      } finally {
+        if (!cancelled) setConsentChecked(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, uid, selectedChild?.id]);
+
+  if (loading || !consentChecked) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator color="#4a90d9" />
+      </View>
+    );
+  }
+
+  if (!consentDone) {
+    return (
+      <ConsentScreen
+        tenantId={tenantId}
+        childId={selectedChild?.id ?? ids[0]}
+        onComplete={() => setConsentDone(true)}
+      />
+    );
+  }
+
+  if (!selectedChild) {
+    return (
+      <View style={styles.centered}>
+        <Text style={styles.noRoleText}>Aucun enfant associé à ce compte.</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.flex}>
+      <ChildPicker
+        items={children}
+        selectedId={selectedChild.id}
+        onSelect={setSelectedChildId}
+      />
+      <View style={styles.tabBar}>
+        <TabButton label="Carnet" active={tab === 'carnet'} onPress={() => setTab('carnet')} />
+        <TabButton
+          label="Annonces"
+          active={tab === 'annonces'}
+          onPress={() => setTab('annonces')}
+        />
+        <TabButton
+          label="Messages"
+          active={tab === 'messages'}
+          onPress={() => setTab('messages')}
+        />
+        <TabButton
+          label="Consent."
+          active={tab === 'consentements'}
+          onPress={() => setTab('consentements')}
+        />
+      </View>
+      {tab === 'carnet' && (
+        <DailyTrackingScreen
+          tenantId={tenantId}
+          childId={selectedChild.id}
+          childName={childDisplayName(selectedChild)}
+          readOnly
+        />
+      )}
+      {tab === 'annonces' && <AnnouncementsScreen tenantId={tenantId} />}
+      {tab === 'messages' && (
+        <PrivateChatScreen
+          tenantId={tenantId}
+          childId={selectedChild.id}
+          recipientId={chatPeer.id}
+          recipientName={chatPeer.name}
+        />
+      )}
+      {tab === 'consentements' && (
+        <ConsentManageScreen
+          tenantId={tenantId}
+          childId={selectedChild.id}
+          childName={childDisplayName(selectedChild)}
+          onGdprRevoked={() => {
+            setConsentDone(false);
+            setTab('carnet');
+          }}
+        />
+      )}
+    </View>
+  );
+}
+
+function ManagementHome({
+  role,
+  tenantId,
+}: {
+  role: UserRole;
+  tenantId: string;
+}) {
+  const [tab, setTab] = useState<'annonces' | 'infos'>('annonces');
+
+  return (
+    <View style={styles.flex}>
+      <View style={styles.tabBar}>
+        <TabButton
+          label="Annonces"
+          active={tab === 'annonces'}
+          onPress={() => setTab('annonces')}
+        />
+        <TabButton
+          label="Infos"
+          active={tab === 'infos'}
+          onPress={() => setTab('infos')}
+        />
+      </View>
+      {tab === 'annonces' && (
+        <AnnouncementsScreen tenantId={tenantId} canSend />
+      )}
+      {tab === 'infos' && (
+        <ScrollView style={styles.managementContainer}>
+          <Text style={styles.managementTitle}>
+            {role === 'network_admin' ? 'Admin réseau' : 'Directeur'}
+          </Text>
+          <Text style={styles.managementText}>
+            Utilisez l’onglet Annonces pour envoyer un message à tous les parents
+            de la crèche. Le tableau de bord de gestion complet arrivera ensuite.
+          </Text>
+        </ScrollView>
+      )}
+    </View>
+  );
+}
+
 export function HomeScreen() {
-  const { role, user } = useAuth();
+  const { role, user, claims } = useAuth();
+
+  const tenantId = claims?.tenantIds?.[0] ?? FALLBACK_TENANT_ID;
+  const childIds = claims?.childIds ?? [];
+  const groupIds = claims?.groupIds ?? [];
 
   useEffect(() => {
     if (!user) return;
 
-    registerForPushNotifications(DEMO_TENANT_ID).catch((err) => {
+    registerForPushNotifications(tenantId).catch((err) => {
       console.warn('Enregistrement push échoué:', err);
     });
 
     return addNotificationListeners();
-  }, [user]);
+  }, [user, tenantId]);
 
   return (
     <View style={styles.flex}>
@@ -113,11 +502,14 @@ export function HomeScreen() {
         Bonjour {user?.displayName ?? user?.email}
       </Text>
 
-      {role === 'educator' && <EducatorHome />}
-      {role === 'parent' && <ParentHome />}
-      {(role === 'director' || role === 'network_admin') && (
-        <ManagementHome role={role} />
+      {role === 'educator' && (
+        <EducatorHome tenantId={tenantId} groupIds={groupIds} />
       )}
+      {role === 'parent' && (
+        <ParentHome tenantId={tenantId} childIds={childIds} />
+      )}
+      {role === 'network_admin' && <AdminScreen tenantId={tenantId} />}
+      {role === 'director' && <ManagementHome role={role} tenantId={tenantId} />}
       {!role && (
         <View style={styles.noRole}>
           <Text style={styles.noRoleText}>
@@ -132,6 +524,7 @@ export function HomeScreen() {
 
 const styles = StyleSheet.create({
   flex: { flex: 1, backgroundColor: '#f8f9fa' },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -144,7 +537,34 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 20, fontWeight: '700', color: '#fff' },
   logout: { color: 'rgba(255,255,255,0.85)', fontSize: 14 },
   welcome: { padding: 16, fontSize: 15, color: '#444', backgroundColor: '#fff' },
-  tabBar: { flexDirection: 'row', backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#e0e0e0' },
+  childPicker: {
+    maxHeight: 52,
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  childPickerContent: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 8,
+    alignItems: 'center',
+  },
+  childChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 16,
+    backgroundColor: '#f0f0f0',
+    marginRight: 8,
+  },
+  childChipActive: { backgroundColor: '#4a90d9' },
+  childChipText: { fontSize: 13, color: '#555', fontWeight: '500' },
+  childChipTextActive: { color: '#fff', fontWeight: '600' },
+  tabBar: {
+    flexDirection: 'row',
+    backgroundColor: '#fff',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
   tab: { flex: 1, paddingVertical: 12, alignItems: 'center' },
   tabActive: { borderBottomWidth: 2, borderBottomColor: '#4a90d9' },
   tabText: { fontSize: 14, color: '#888' },

@@ -83,6 +83,7 @@ Voir le guide complet : [`firebase/PRODUCTION.md`](firebase/PRODUCTION.md)
 
 | Rôle | Email | Mot de passe |
 |------|-------|--------------|
+| Admin réseau | admin@demo.creche | Demo2026! |
 | Directeur | directeur@demo.creche | Demo2026! |
 | Éducateur | educateur@demo.creche | Demo2026! |
 | Parent | parent@demo.creche | Demo2026! |

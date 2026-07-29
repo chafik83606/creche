@@ -26,6 +26,8 @@ interface Props {
   tenantId: string;
   childId: string;
   childName: string;
+  /** Parents : consultation seule. Éducateurs : saisie + consultation. */
+  readOnly?: boolean;
 }
 
 const MEAL_TYPES: { value: MealType; label: string }[] = [
@@ -45,25 +47,40 @@ function todayKey(): string {
   return new Date().toISOString().split('T')[0];
 }
 
-export function DailyTrackingScreen({ tenantId, childId, childName }: Props) {
+export function DailyTrackingScreen({
+  tenantId,
+  childId,
+  childName,
+  readOnly = false,
+}: Props) {
   const [mealType, setMealType] = useState<MealType>('lunch');
   const [quantity, setQuantity] = useState<MealQuantity>('all');
   const [accepted, setAccepted] = useState(true);
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [todayMeals, setTodayMeals] = useState<MealEntry[]>([]);
 
   const date = todayKey();
   const logPath = paths.dailyLog(tenantId, childId, date);
 
   React.useEffect(() => {
-    loadTodayLog();
-  }, [tenantId, childId]);
+    let cancelled = false;
+    setLoading(true);
+    loadTodayLog().finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, childId, date]);
 
   async function loadTodayLog() {
     const snap = await getDoc(doc(db, logPath));
     if (snap.exists()) {
       setTodayMeals(snap.data().meals ?? []);
+    } else {
+      setTodayMeals([]);
     }
   }
 
@@ -123,80 +140,92 @@ export function DailyTrackingScreen({ tenantId, childId, childName }: Props) {
       <Text style={styles.title}>Carnet — {childName}</Text>
       <Text style={styles.date}>{date}</Text>
 
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Repas</Text>
-
-        <Text style={styles.label}>Type</Text>
-        <View style={styles.chipRow}>
-          {MEAL_TYPES.map((t) => (
-            <TouchableOpacity
-              key={t.value}
-              style={[styles.chip, mealType === t.value && styles.chipActive]}
-              onPress={() => setMealType(t.value)}
-            >
-              <Text style={[styles.chipText, mealType === t.value && styles.chipTextActive]}>
-                {t.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <Text style={styles.label}>Quantité</Text>
-        <View style={styles.chipRow}>
-          {QUANTITIES.map((q) => (
-            <TouchableOpacity
-              key={q.value}
-              style={[styles.chip, quantity === q.value && styles.chipActive]}
-              onPress={() => setQuantity(q.value)}
-            >
-              <Text style={[styles.chipText, quantity === q.value && styles.chipTextActive]}>
-                {q.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <Text style={styles.label}>Acceptation</Text>
-        <View style={styles.chipRow}>
-          <TouchableOpacity
-            style={[styles.chip, accepted && styles.chipActive]}
-            onPress={() => setAccepted(true)}
-          >
-            <Text style={[styles.chipText, accepted && styles.chipTextActive]}>Accepté</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.chip, !accepted && styles.chipReject]}
-            onPress={() => setAccepted(false)}
-          >
-            <Text style={[styles.chipText, !accepted && styles.chipTextActive]}>Refusé</Text>
-          </TouchableOpacity>
-        </View>
-
-        <TextInput
-          style={styles.input}
-          placeholder="Notes (optionnel)"
-          value={notes}
-          onChangeText={setNotes}
-          multiline
-        />
-
-        <TouchableOpacity
-          style={[styles.saveButton, saving && styles.saveButtonDisabled]}
-          onPress={saveMeal}
-          disabled={saving}
-        >
-          {saving ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.saveButtonText}>Enregistrer le repas</Text>
-          )}
-        </TouchableOpacity>
-      </View>
-
-      {todayMeals.length > 0 && (
+      {!readOnly && (
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Repas du jour ({todayMeals.length})</Text>
-          {todayMeals.map((meal) => (
+          <Text style={styles.sectionTitle}>Repas</Text>
+
+          <Text style={styles.label}>Type</Text>
+          <View style={styles.chipRow}>
+            {MEAL_TYPES.map((t) => (
+              <TouchableOpacity
+                key={t.value}
+                style={[styles.chip, mealType === t.value && styles.chipActive]}
+                onPress={() => setMealType(t.value)}
+              >
+                <Text style={[styles.chipText, mealType === t.value && styles.chipTextActive]}>
+                  {t.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <Text style={styles.label}>Quantité</Text>
+          <View style={styles.chipRow}>
+            {QUANTITIES.map((q) => (
+              <TouchableOpacity
+                key={q.value}
+                style={[styles.chip, quantity === q.value && styles.chipActive]}
+                onPress={() => setQuantity(q.value)}
+              >
+                <Text style={[styles.chipText, quantity === q.value && styles.chipTextActive]}>
+                  {q.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <Text style={styles.label}>Acceptation</Text>
+          <View style={styles.chipRow}>
+            <TouchableOpacity
+              style={[styles.chip, accepted && styles.chipActive]}
+              onPress={() => setAccepted(true)}
+            >
+              <Text style={[styles.chipText, accepted && styles.chipTextActive]}>Accepté</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.chip, !accepted && styles.chipReject]}
+              onPress={() => setAccepted(false)}
+            >
+              <Text style={[styles.chipText, !accepted && styles.chipTextActive]}>Refusé</Text>
+            </TouchableOpacity>
+          </View>
+
+          <TextInput
+            style={styles.input}
+            placeholder="Notes (optionnel)"
+            value={notes}
+            onChangeText={setNotes}
+            multiline
+          />
+
+          <TouchableOpacity
+            style={[styles.saveButton, saving && styles.saveButtonDisabled]}
+            onPress={saveMeal}
+            disabled={saving}
+          >
+            {saving ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.saveButtonText}>Enregistrer le repas</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      )}
+
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>
+          {readOnly ? 'Journée de votre enfant' : `Repas du jour (${todayMeals.length})`}
+        </Text>
+        {loading ? (
+          <ActivityIndicator color="#4a90d9" />
+        ) : todayMeals.length === 0 ? (
+          <Text style={styles.emptyText}>
+            {readOnly
+              ? "Aucun repas enregistré pour aujourd'hui. L'éducateur remplira le carnet pendant la journée."
+              : 'Aucun repas enregistré pour le moment.'}
+          </Text>
+        ) : (
+          todayMeals.map((meal) => (
             <View key={meal.id} style={styles.entryCard}>
               <Text style={styles.entryType}>
                 {MEAL_TYPES.find((t) => t.value === meal.type)?.label}
@@ -208,9 +237,9 @@ export function DailyTrackingScreen({ tenantId, childId, childName }: Props) {
               </Text>
               {meal.notes && <Text style={styles.entryNotes}>{meal.notes}</Text>}
             </View>
-          ))}
-        </View>
-      )}
+          ))
+        )}
+      </View>
     </ScrollView>
   );
 }
@@ -272,4 +301,5 @@ const styles = StyleSheet.create({
   entryType: { fontWeight: '600', fontSize: 14, color: '#1a1a2e' },
   entryDetail: { fontSize: 13, color: '#666', marginTop: 2 },
   entryNotes: { fontSize: 12, color: '#888', marginTop: 4, fontStyle: 'italic' },
+  emptyText: { fontSize: 14, color: '#888', lineHeight: 20 },
 });

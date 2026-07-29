@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -6,39 +6,16 @@ import {
   TouchableOpacity,
   StyleSheet,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
-import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
-import { db, auth } from '../lib/firebase';
-import { paths } from '@creche/shared';
+import { auth } from '../lib/firebase';
 import type { ConsentType } from '@creche/shared';
-
-const CONSENT_VERSION = '1.0.0';
-
-const CONSENT_TEXTS: Record<ConsentType, { title: string; body: string }> = {
-  gdpr_data: {
-    title: 'Consentement — Données personnelles (RGPD)',
-    body:
-      'Conformément au Règlement Général sur la Protection des Données (RGPD), ' +
-      'j\'accepte que les données personnelles de mon enfant (identité, suivi quotidien, ' +
-      'données de santé) soient collectées et traitées par la crèche dans le cadre du suivi ' +
-      'éducatif et de la communication avec les familles.\n\n' +
-      'Ces données sont hébergées sur des serveurs certifiés HDS situés en France. ' +
-      'Elles seront conservées pendant la durée de scolarisation de mon enfant, puis ' +
-      'supprimées dans un délai de 30 jours après son départ.\n\n' +
-      'Je dispose d\'un droit d\'accès, de rectification et de suppression de ces données, ' +
-      'exerçable à tout moment auprès de la direction de la crèche.',
-  },
-  image_rights: {
-    title: 'Autorisation — Droit à l\'image',
-    body:
-      'J\'autorise la crèche à prendre des photos de mon enfant dans le cadre des activités ' +
-      'éducatives et à les partager avec moi exclusivement via l\'application.\n\n' +
-      'Ces photos ne seront pas diffusées publiquement ni partagées avec d\'autres familles. ' +
-      'Elles seront stockées de manière sécurisée et supprimées à la fin de la scolarisation.\n\n' +
-      'Je peux révoquer cette autorisation à tout moment depuis l\'application. ' +
-      'La révocation n\'a pas d\'effet rétroactif sur les photos déjà partagées.',
-  },
-};
+import {
+  CONSENT_TEXTS,
+  isConsentActive,
+  loadConsent,
+  saveConsent,
+} from '../lib/consents';
 
 interface Props {
   tenantId: string;
@@ -47,6 +24,7 @@ interface Props {
 }
 
 export function ConsentScreen({ tenantId, childId, onComplete }: Props) {
+  const [checking, setChecking] = useState(true);
   const [step, setStep] = useState(0);
   const [gdprAccepted, setGdprAccepted] = useState(false);
   const [imageAccepted, setImageAccepted] = useState(false);
@@ -56,6 +34,29 @@ export function ConsentScreen({ tenantId, childId, onComplete }: Props) {
   const currentType = steps[step];
   const current = CONSENT_TEXTS[currentType];
   const isAccepted = step === 0 ? gdprAccepted : imageAccepted;
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const uid = auth.currentUser?.uid;
+      if (!uid) {
+        setChecking(false);
+        return;
+      }
+      try {
+        const existing = await loadConsent(tenantId, uid, childId, 'gdpr_data');
+        if (!cancelled && isConsentActive(existing)) {
+          onComplete();
+          return;
+        }
+      } finally {
+        if (!cancelled) setChecking(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, childId]);
 
   async function handleNext() {
     if (step === 0 && !gdprAccepted) {
@@ -68,38 +69,20 @@ export function ConsentScreen({ tenantId, childId, onComplete }: Props) {
       return;
     }
 
-    await saveConsents();
+    await persistConsents(gdprAccepted, imageAccepted);
   }
 
-  async function saveConsents() {
+  async function persistConsents(gdpr: boolean, image: boolean) {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
 
     setSaving(true);
     try {
-      const consentsRef = collection(db, paths.consents(tenantId));
-
-      await addDoc(consentsRef, {
-        childId,
-        parentId: uid,
-        type: 'gdpr_data',
-        accepted: gdprAccepted,
-        signedAt: serverTimestamp(),
-        version: CONSENT_VERSION,
-      });
-
-      await addDoc(consentsRef, {
-        childId,
-        parentId: uid,
-        type: 'image_rights',
-        accepted: imageAccepted,
-        signedAt: serverTimestamp(),
-        version: CONSENT_VERSION,
-      });
-
+      await saveConsent(tenantId, uid, childId, 'gdpr_data', gdpr);
+      await saveConsent(tenantId, uid, childId, 'image_rights', image);
       onComplete();
     } catch (error) {
-      Alert.alert('Erreur', 'Impossible d\'enregistrer les consentements.');
+      Alert.alert('Erreur', "Impossible d'enregistrer les consentements.");
       console.error(error);
     } finally {
       setSaving(false);
@@ -114,12 +97,24 @@ export function ConsentScreen({ tenantId, childId, onComplete }: Props) {
     }
   }
 
+  if (checking) {
+    return (
+      <View style={styles.loading}>
+        <ActivityIndicator color="#4a90d9" />
+      </View>
+    );
+  }
+
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.progress}>
-        <Text style={styles.progressText}>Étape {step + 1} / {steps.length}</Text>
+        <Text style={styles.progressText}>
+          Étape {step + 1} / {steps.length}
+        </Text>
         <View style={styles.progressBar}>
-          <View style={[styles.progressFill, { width: `${((step + 1) / steps.length) * 100}%` }]} />
+          <View
+            style={[styles.progressFill, { width: `${((step + 1) / steps.length) * 100}%` }]}
+          />
         </View>
       </View>
 
@@ -135,14 +130,14 @@ export function ConsentScreen({ tenantId, childId, onComplete }: Props) {
         </View>
         <Text style={styles.checkboxLabel}>
           {step === 0
-            ? 'J\'accepte le traitement des données de mon enfant'
-            : 'J\'autorise la prise et le partage de photos de mon enfant'}
+            ? "J'accepte le traitement des données de mon enfant"
+            : "J'autorise la prise et le partage de photos de mon enfant"}
           {step === 1 && ' (optionnel)'}
         </Text>
       </TouchableOpacity>
 
       <TouchableOpacity
-        style={[styles.button, (step === 0 && !gdprAccepted) && styles.buttonDisabled]}
+        style={[styles.button, step === 0 && !gdprAccepted && styles.buttonDisabled]}
         onPress={handleNext}
         disabled={saving || (step === 0 && !gdprAccepted)}
       >
@@ -152,7 +147,13 @@ export function ConsentScreen({ tenantId, childId, onComplete }: Props) {
       </TouchableOpacity>
 
       {step === 1 && (
-        <TouchableOpacity style={styles.skipButton} onPress={saveConsents}>
+        <TouchableOpacity
+          style={styles.skipButton}
+          onPress={() => {
+            setImageAccepted(false);
+            persistConsents(gdprAccepted, false);
+          }}
+        >
           <Text style={styles.skipText}>Refuser l'autorisation image et terminer</Text>
         </TouchableOpacity>
       )}
@@ -163,6 +164,7 @@ export function ConsentScreen({ tenantId, childId, onComplete }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8f9fa' },
   content: { padding: 20 },
+  loading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   progress: { marginBottom: 24 },
   progressText: { fontSize: 13, color: '#666', marginBottom: 6 },
   progressBar: { height: 4, backgroundColor: '#e0e0e0', borderRadius: 2 },

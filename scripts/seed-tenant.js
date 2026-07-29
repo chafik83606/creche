@@ -48,6 +48,13 @@ const CHILD_ID = 'demo-child-001';
 
 const USERS = [
   {
+    email: 'admin@demo.creche',
+    password: 'Demo2026!',
+    displayName: 'Alex Admin',
+    role: 'network_admin',
+    uid: 'demo-admin-001',
+  },
+  {
     email: 'directeur@demo.creche',
     password: 'Demo2026!',
     displayName: 'Jean Directeur',
@@ -165,6 +172,7 @@ async function seed() {
 
   console.log('\n✅ Seed terminé !\n');
   console.log('Comptes de test :');
+  console.log('  Admin      : admin@demo.creche / Demo2026!');
   console.log('  Directeur  : directeur@demo.creche / Demo2026!');
   console.log('  Éducateur  : educateur@demo.creche / Demo2026!');
   console.log('  Parent     : parent@demo.creche / Demo2026!');
