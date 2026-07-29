@@ -146,42 +146,28 @@ workflows:
           plutil -p "$HOME/export_options.plist"
       - name: Build IPA
         script: |
-          set -e
+          set -euo pipefail
           cd mobile/ios
           WORKSPACE=$(ls -d *.xcworkspace | head -n 1)
-          # Ne pas prendre le 1er scheme alphabetique (souvent EXApplication des pods Expo)
-          SCHEME=$(xcodebuild -list -workspace "$WORKSPACE" -json | python3 -c "
-          import sys, json
-          schemes = json.load(sys.stdin)['workspace']['schemes']
-          prefer = [s for s in schemes if s == 'Zibou']
-          if not prefer:
-              prefer = [s for s in schemes if not s.startswith('EX') and 'Pods' not in s]
-          print((prefer or schemes)[0])
-          ")
+          xcodebuild -list -workspace "$WORKSPACE" -json > /tmp/xcode_schemes.json
+          SCHEME=$(python3 -c "import json; s=json.load(open('/tmp/xcode_schemes.json'))['workspace']['schemes']; p=[x for x in s if x=='Zibou'] or [x for x in s if not x.startswith('EX')]; print((p or s)[0])")
           echo "Using workspace: $WORKSPACE"
           echo "Using scheme: $SCHEME"
           plutil -p "$HOME/export_options.plist" || true
 
-          if ! xcode-project build-ipa --workspace "$WORKSPACE" --scheme "$SCHEME"; then
-            echo "Export failed with app-store-connect — retry with app-store"
-            python3 <<'PY'
-            import os, plistlib
-            path = os.path.expanduser("~/export_options.plist")
-            with open(path, "rb") as f:
-                data = plistlib.load(f)
-            data["method"] = "app-store"
-            data.pop("destination", None)
-            with open(path, "wb") as f:
-                plistlib.dump(data, f)
-            print("method retry:", data.get("method"))
-            PY
-            xcode-project build-ipa --workspace "$WORKSPACE" --scheme "$SCHEME" || {
-              echo "===== Bundle RN script logs (if any) ====="
-              find "$HOME/Library/Developer/Xcode/DerivedData" -name '*Script-00DD1BFF*' -o -name '*Bundle*React*' 2>/dev/null | head -n 20 || true
-              ls -la /tmp/xcodebuild_logs 2>/dev/null || true
-              exit 1
-            }
+          set +e
+          xcode-project build-ipa --workspace "$WORKSPACE" --scheme "$SCHEME"
+          BUILD_STATUS=$?
+          set -e
+
+          if [ "$BUILD_STATUS" -eq 0 ]; then
+            echo "IPA build succeeded"
+            exit 0
           fi
+
+          echo "Export failed with app-store-connect — retry with app-store"
+          python3 -c "import os,plistlib; p=os.path.expanduser('~/export_options.plist'); d=plistlib.load(open(p,'rb')); d['method']='app-store'; d.pop('destination',None); plistlib.dump(d, open(p,'wb')); print(d.get('method'))"
+          xcode-project build-ipa --workspace "$WORKSPACE" --scheme "$SCHEME"
 
     artifacts:
       - mobile/ios/build/ios/ipa/*.ipa
