@@ -59,8 +59,25 @@ workflows:
           # Le script "Bundle React Native code and images" cherche
           # mobile/node_modules/..., alors que npm workspaces hisse tout à la racine.
           cd mobile
+          STASH=$(mktemp -d)
+          if [ -d node_modules ] && [ ! -L node_modules ]; then
+            (
+              cd node_modules
+              find . -mindepth 1 -maxdepth 2 -type d | while read -r pkg; do
+                pkg=${pkg#./}
+                if [ ! -e "../../node_modules/$pkg" ]; then
+                  mkdir -p "$STASH/$(dirname "$pkg")"
+                  cp -R "$pkg" "$STASH/$pkg"
+                fi
+              done
+            )
+          fi
           rm -rf node_modules
           ln -sfn ../node_modules node_modules
+          if [ "$(ls -A "$STASH" 2>/dev/null)" ]; then
+            cp -R "$STASH/." node_modules/
+          fi
+          rm -rf "$STASH"
           test -e node_modules/expo
           test -e node_modules/react-native
           ls -la node_modules/expo | head -n 1
@@ -193,10 +210,28 @@ workflows:
       - name: Link monorepo node_modules
         script: |
           cd mobile
+          STASH=$(mktemp -d)
+          if [ -d node_modules ] && [ ! -L node_modules ]; then
+            (
+              cd node_modules
+              find . -mindepth 1 -maxdepth 2 -type d | while read -r pkg; do
+                pkg=${pkg#./}
+                if [ ! -e "../../node_modules/$pkg" ]; then
+                  mkdir -p "$STASH/$(dirname "$pkg")"
+                  cp -R "$pkg" "$STASH/$pkg"
+                fi
+              done
+            )
+          fi
           rm -rf node_modules
           ln -sfn ../node_modules node_modules
+          if [ "$(ls -A "$STASH" 2>/dev/null)" ]; then
+            cp -R "$STASH/." node_modules/
+          fi
+          rm -rf "$STASH"
           test -e node_modules/expo
           test -e node_modules/react-native
+          test -e node_modules/@react-native-async-storage/async-storage
       - name: Build AAB
         script: |
           set -e
