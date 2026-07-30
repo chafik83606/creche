@@ -104,6 +104,30 @@ function formatDisplayDate(key: string): string {
   return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
+function toJsDate(value: unknown): Date | null {
+  if (!value) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  if (value instanceof Timestamp) return value.toDate();
+  if (typeof value === 'object' && value !== null && 'toDate' in value) {
+    const maybe = value as { toDate?: () => Date };
+    if (typeof maybe.toDate === 'function') {
+      const d = maybe.toDate();
+      return Number.isNaN(d.getTime()) ? null : d;
+    }
+  }
+  if (typeof value === 'object' && value !== null && 'seconds' in value) {
+    const seconds = (value as { seconds: number }).seconds;
+    if (typeof seconds === 'number') return new Date(seconds * 1000);
+  }
+  return null;
+}
+
+function formatClock(value: unknown): string {
+  const d = toJsDate(value);
+  if (!d) return '';
+  return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+}
+
 interface DayData {
   meals: MealEntry[];
   naps: NapEntry[];
@@ -358,49 +382,73 @@ export function DailyTrackingScreen({
   }
 
   function renderEntries() {
-    const entries: { key: string; title: string; detail: string; note?: string }[] = [];
+    const entries: {
+      key: string;
+      title: string;
+      detail: string;
+      note?: string;
+      timeLabel: string;
+      sortAt: number;
+    }[] = [];
 
     for (const m of dayData.meals) {
+      const at = toJsDate(m.time)?.getTime() ?? 0;
       entries.push({
         key: m.id,
         title: `🍽 ${MEAL_TYPES.find((t) => t.value === m.type)?.label ?? m.type}`,
         detail: `${QUANTITIES.find((q) => q.value === m.quantity)?.label} — ${m.accepted ? 'Accepté' : 'Refusé'}`,
         note: m.notes,
+        timeLabel: formatClock(m.time),
+        sortAt: at,
       });
     }
     for (const n of dayData.naps) {
+      const sleep = formatClock(n.sleepTime);
+      const wake = formatClock(n.wakeTime);
+      const at = toJsDate(n.sleepTime)?.getTime() ?? 0;
       entries.push({
         key: n.id,
         title: `😴 Sieste`,
         detail: `${NAP_QUALITIES.find((q) => q.value === n.quality)?.label}${n.durationMinutes ? ` — ${n.durationMinutes} min` : ''}`,
         note: n.notes,
+        timeLabel: sleep && wake ? `${sleep} – ${wake}` : sleep,
+        sortAt: at,
       });
     }
     for (const a of dayData.activities) {
+      const at = toJsDate(a.time)?.getTime() ?? 0;
       entries.push({
         key: a.id,
         title: `🎨 ${ACTIVITY_CATEGORIES.find((c) => c.value === a.category)?.label ?? a.category}`,
         detail: a.description,
+        timeLabel: formatClock(a.time),
+        sortAt: at,
       });
     }
     for (const h of dayData.health) {
+      const at = toJsDate(h.time)?.getTime() ?? 0;
       entries.push({
         key: h.id,
         title: `🩺 Santé`,
         detail: [h.temperature ? `${h.temperature}°C` : '', h.incident].filter(Boolean).join(' — ') || 'Observation',
         note: h.notes,
+        timeLabel: formatClock(h.time),
+        sortAt: at,
       });
     }
     for (const d of dayData.diapers) {
+      const at = toJsDate(d.time)?.getTime() ?? 0;
       entries.push({
         key: d.id,
         title: `🧷 Change`,
         detail: DIAPER_TYPES.find((t) => t.value === d.type)?.label ?? d.type,
         note: d.notes,
+        timeLabel: formatClock(d.time),
+        sortAt: at,
       });
     }
 
-    return entries;
+    return entries.sort((a, b) => a.sortAt - b.sortAt);
   }
 
   const allEntries = renderEntries();
@@ -501,7 +549,10 @@ export function DailyTrackingScreen({
         ) : (
           allEntries.map((e) => (
             <View key={e.key} style={styles.entryCard}>
-              <Text style={styles.entryType}>{e.title}</Text>
+              <View style={styles.entryHeader}>
+                <Text style={styles.entryType}>{e.title}</Text>
+                {e.timeLabel ? <Text style={styles.entryTime}>{e.timeLabel}</Text> : null}
+              </View>
               <Text style={styles.entryDetail}>{e.detail}</Text>
               {e.note && <Text style={styles.entryNotes}>{e.note}</Text>}
             </View>
@@ -597,7 +648,14 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 8,
   },
-  entryType: { fontWeight: '600', fontSize: 14, color: '#1a1a2e' },
+  entryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  entryType: { flex: 1, fontWeight: '600', fontSize: 14, color: '#1a1a2e' },
+  entryTime: { fontSize: 13, fontWeight: '600', color: '#3b82f6' },
   entryDetail: { fontSize: 13, color: '#666', marginTop: 2 },
   entryNotes: { fontSize: 12, color: '#888', marginTop: 4, fontStyle: 'italic' },
   emptyText: { fontSize: 14, color: '#888', lineHeight: 20 },
