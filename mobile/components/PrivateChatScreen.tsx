@@ -604,7 +604,7 @@ export function PrivateChatScreen({
                 ) : null}
                 <View style={styles.metaRow}>
                   <Text style={[styles.bubbleTime, isMine && styles.bubbleTimeMine]}>
-                    {formatHourTime(item.createdAt)}
+                    {formatFirestoreTime(item.createdAt)}
                   </Text>
                   {isMine ? <Text style={styles.deleteHint}>⌫</Text> : null}
                 </View>
