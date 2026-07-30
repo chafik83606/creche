@@ -18,14 +18,14 @@
         "foregroundImage": "./assets/android-icon-foreground.png"
       },
       "package": "fr.creche.app",
-      "versionCode": 12,
+      "versionCode": 13,
       "googleServicesFile": "./google-services.json",
       "softwareKeyboardLayoutMode": "resize"
     },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "fr.creche.app",
-      "buildNumber": "12",
+      "buildNumber": "13",
       "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,

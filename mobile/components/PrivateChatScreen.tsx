@@ -5,6 +5,7 @@ import {
   FlatList,
   TextInput,
   TouchableOpacity,
+  Pressable,
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
@@ -31,10 +32,11 @@ import {
   onSnapshot,
   addDoc,
   updateDoc,
+  deleteDoc,
   doc,
   serverTimestamp,
 } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL, deleteObject, refFromURL } from 'firebase/storage';
 import { db, auth, storage } from '../lib/firebase';
 import { paths, formatFirestoreTime, getFirestoreTime } from '@creche/shared';
 import type { PrivateMessage } from '@creche/shared';
@@ -72,13 +74,18 @@ function AudioMessagePlayer({
   }
 
   return (
-    <TouchableOpacity style={styles.audioRow} onPress={toggle}>
-      <Text style={[styles.audioIcon, isMine && styles.bubbleTextMine]}>
-        {playing ? '⏹' : '▶'}
-      </Text>
-      <Text style={[styles.audioLabel, isMine && styles.bubbleTextMine]}>
-        Message audio
-      </Text>
+    <TouchableOpacity style={styles.audioRow} onPress={toggle} activeOpacity={0.75}>
+      <View style={[styles.audioPlayBtn, isMine ? styles.audioPlayBtnMine : styles.audioPlayBtnOther]}>
+        <Text style={[styles.audioIcon, isMine && styles.bubbleTextMine]}>
+          {playing ? '⏹' : '▶'}
+        </Text>
+      </View>
+      <View style={styles.audioMeta}>
+        <Text style={[styles.audioLabel, isMine && styles.bubbleTextMine]}>Message audio</Text>
+        <Text style={[styles.audioHint, isMine && styles.bubbleTimeMine]}>
+          {playing ? 'Lecture…' : 'Appuyer pour écouter'}
+        </Text>
+      </View>
     </TouchableOpacity>
   );
 }
@@ -340,14 +347,30 @@ export function PrivateChatScreen({
     }
 
     const unsubSent = onSnapshot(sentQuery, (snap) => {
-      snap.docs.forEach((d) => allMessages.set(d.id, { id: d.id, ...d.data() } as PrivateMessage));
+      snap.docChanges().forEach((change) => {
+        if (change.type === 'removed') {
+          allMessages.delete(change.doc.id);
+        } else {
+          allMessages.set(change.doc.id, {
+            id: change.doc.id,
+            ...change.doc.data(),
+          } as PrivateMessage);
+        }
+      });
       mergeAndSet();
     });
 
     const unsubReceived = onSnapshot(receivedQuery, (snap) => {
-      snap.docs.forEach((d) => {
-        const msg = { id: d.id, ...d.data() } as PrivateMessage;
-        allMessages.set(d.id, msg);
+      snap.docChanges().forEach((change) => {
+        if (change.type === 'removed') {
+          allMessages.delete(change.doc.id);
+          return;
+        }
+        const msg = {
+          id: change.doc.id,
+          ...change.doc.data(),
+        } as PrivateMessage;
+        allMessages.set(change.doc.id, msg);
         if (msg.recipientId === uid && !msg.readAt) {
           updateDoc(doc(db, paths.privateMessage(tenantId, msg.id)), {
             readAt: serverTimestamp(),
@@ -479,6 +502,36 @@ export function PrivateChatScreen({
     ]);
   }
 
+  function confirmDeleteMessage(msg: PrivateMessage) {
+    if (msg.senderId !== uid) return;
+    Alert.alert('Supprimer le message', 'Ce message sera supprimé pour tout le monde.', [
+      { text: 'Annuler', style: 'cancel' },
+      {
+        text: 'Supprimer',
+        style: 'destructive',
+        onPress: () => {
+          void deleteMessage(msg);
+        },
+      },
+    ]);
+  }
+
+  async function deleteMessage(msg: PrivateMessage) {
+    try {
+      await deleteDoc(doc(db, paths.privateMessage(tenantId, msg.id)));
+      if (msg.mediaUrl) {
+        try {
+          await deleteObject(refFromURL(storage, msg.mediaUrl));
+        } catch (storageErr) {
+          console.warn('Media delete skipped', storageErr);
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      Alert.alert('Erreur', 'Impossible de supprimer ce message.');
+    }
+  }
+
   const bottomPad = Math.max(insets.bottom, Platform.OS === 'android' ? 12 : 8);
 
   return (
@@ -487,7 +540,11 @@ export function PrivateChatScreen({
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 120 : 0}
     >
-      <Text style={styles.header}>Conversation — {recipientName}</Text>
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Conversation</Text>
+        <Text style={styles.headerSubtitle}>{recipientName}</Text>
+        <Text style={styles.headerHint}>Appui long sur vos messages pour les supprimer</Text>
+      </View>
 
       <FlatList
         ref={listRef}
@@ -498,34 +555,60 @@ export function PrivateChatScreen({
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"
         onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: false })}
+        ListEmptyComponent={
+          <View style={styles.emptyState}>
+            <Text style={styles.emptyTitle}>Aucun message</Text>
+            <Text style={styles.emptyText}>Écrivez un message pour démarrer la conversation.</Text>
+          </View>
+        }
         renderItem={({ item }) => {
           const isMine = item.senderId === uid;
           const isDefaultMediaLabel =
             item.body === 'Image' || item.body === 'Vidéo' || item.body === 'Message audio';
+          const isImage = !!item.mediaUrl && item.mediaType === 'image';
 
           return (
-            <View style={[styles.bubble, isMine ? styles.bubbleMine : styles.bubbleOther]}>
-              {item.mediaUrl && item.mediaType === 'image' ? (
-                <Image source={{ uri: item.mediaUrl }} style={styles.mediaImage} />
-              ) : null}
-              {item.mediaUrl && item.mediaType === 'video' ? (
-                <TouchableOpacity onPress={() => Linking.openURL(item.mediaUrl!)}>
-                  <Text style={[styles.videoLink, isMine && styles.bubbleTextMine]}>
-                    ▶ Voir la vidéo
+            <View style={[styles.row, isMine ? styles.rowMine : styles.rowOther]}>
+              <Pressable
+                onLongPress={() => confirmDeleteMessage(item)}
+                delayLongPress={350}
+                style={({ pressed }) => [
+                  styles.bubble,
+                  isMine ? styles.bubbleMine : styles.bubbleOther,
+                  isImage && styles.bubbleMedia,
+                  pressed && isMine && styles.bubblePressed,
+                ]}
+              >
+                {isImage ? (
+                  <Image source={{ uri: item.mediaUrl }} style={styles.mediaImage} />
+                ) : null}
+                {item.mediaUrl && item.mediaType === 'video' ? (
+                  <TouchableOpacity
+                    style={[styles.videoChip, isMine ? styles.videoChipMine : styles.videoChipOther]}
+                    onPress={() => Linking.openURL(item.mediaUrl!)}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={[styles.videoChipIcon, isMine && styles.bubbleTextMine]}>▶</Text>
+                    <Text style={[styles.videoChipText, isMine && styles.bubbleTextMine]}>
+                      Voir la vidéo
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+                {item.mediaUrl && item.mediaType === 'audio' ? (
+                  <AudioMessagePlayer url={item.mediaUrl} isMine={!!isMine} />
+                ) : null}
+                {!!item.body && !isDefaultMediaLabel ? (
+                  <Text style={[styles.bubbleText, isMine && styles.bubbleTextMine]}>
+                    {item.body}
                   </Text>
-                </TouchableOpacity>
-              ) : null}
-              {item.mediaUrl && item.mediaType === 'audio' ? (
-                <AudioMessagePlayer url={item.mediaUrl} isMine={!!isMine} />
-              ) : null}
-              {!!item.body && !isDefaultMediaLabel ? (
-                <Text style={[styles.bubbleText, isMine && styles.bubbleTextMine]}>
-                  {item.body}
-                </Text>
-              ) : null}
-              <Text style={[styles.bubbleTime, isMine && styles.bubbleTimeMine]}>
-                {formatFirestoreTime(item.createdAt)}
-              </Text>
+                ) : null}
+                <View style={styles.metaRow}>
+                  <Text style={[styles.bubbleTime, isMine && styles.bubbleTimeMine]}>
+                    {formatHourTime(item.createdAt)}
+                  </Text>
+                  {isMine ? <Text style={styles.deleteHint}>⌫</Text> : null}
+                </View>
+              </Pressable>
             </View>
           );
         }}
@@ -545,71 +628,147 @@ export function PrivateChatScreen({
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f0f2f5' },
+  container: { flex: 1, backgroundColor: '#eef2f7' },
   header: {
-    fontSize: 16,
-    fontWeight: '600',
-    padding: 16,
+    paddingHorizontal: 18,
+    paddingTop: 14,
+    paddingBottom: 12,
     backgroundColor: '#fff',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-    color: '#1a1a2e',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#d9e0ea',
+  },
+  headerTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#6b7a90',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  headerSubtitle: {
+    marginTop: 2,
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1a2433',
+  },
+  headerHint: {
+    marginTop: 4,
+    fontSize: 12,
+    color: '#8a97ab',
   },
   messageList: { flex: 1 },
-  messageListContent: { padding: 12, paddingBottom: 8, flexGrow: 1, justifyContent: 'flex-end' },
+  messageListContent: {
+    paddingHorizontal: 14,
+    paddingTop: 16,
+    paddingBottom: 12,
+    flexGrow: 1,
+    justifyContent: 'flex-end',
+  },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 48,
+    paddingHorizontal: 24,
+  },
+  emptyTitle: { fontSize: 16, fontWeight: '700', color: '#3a4a63', marginBottom: 6 },
+  emptyText: { fontSize: 14, color: '#7b8aa3', textAlign: 'center', lineHeight: 20 },
+  row: {
+    marginBottom: 12,
+    maxWidth: '86%',
+  },
+  rowMine: { alignSelf: 'flex-end' },
+  rowOther: { alignSelf: 'flex-start' },
   bubble: {
-    maxWidth: '80%',
-    borderRadius: 16,
-    padding: 12,
-    marginBottom: 8,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 10,
+  },
+  bubbleMedia: {
+    paddingHorizontal: 6,
+    paddingTop: 6,
+    paddingBottom: 8,
   },
   bubbleMine: {
-    alignSelf: 'flex-end',
-    backgroundColor: '#4a90d9',
-    borderBottomRightRadius: 4,
+    backgroundColor: '#3b82f6',
+    borderBottomRightRadius: 6,
   },
   bubbleOther: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#fff',
-    borderBottomLeftRadius: 4,
+    backgroundColor: '#ffffff',
+    borderBottomLeftRadius: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#d7dee8',
   },
-  bubbleText: { fontSize: 14, color: '#1a1a2e', lineHeight: 20 },
+  bubblePressed: { opacity: 0.88 },
+  bubbleText: { fontSize: 15, color: '#1a2433', lineHeight: 22 },
   bubbleTextMine: { color: '#fff' },
-  bubbleTime: { fontSize: 10, color: '#999', marginTop: 4, alignSelf: 'flex-end' },
-  bubbleTimeMine: { color: 'rgba(255,255,255,0.7)' },
+  metaRow: {
+    marginTop: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 8,
+    paddingHorizontal: 4,
+  },
+  bubbleTime: { fontSize: 11, color: '#8a97ab', fontWeight: '500' },
+  bubbleTimeMine: { color: 'rgba(255,255,255,0.78)' },
+  deleteHint: { fontSize: 11, color: 'rgba(255,255,255,0.55)' },
   mediaImage: {
-    width: 200,
-    height: 200,
+    width: 220,
+    height: 220,
+    borderRadius: 14,
+    marginBottom: 4,
+    backgroundColor: '#d8dee8',
+  },
+  videoChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
     borderRadius: 12,
-    marginBottom: 6,
-    backgroundColor: '#ddd',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 4,
   },
-  videoLink: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#1a1a2e',
-    marginBottom: 6,
-    textDecorationLine: 'underline',
+  videoChipMine: { backgroundColor: 'rgba(255,255,255,0.16)' },
+  videoChipOther: { backgroundColor: '#eef4fb' },
+  videoChipIcon: { fontSize: 13, color: '#1a2433', fontWeight: '700' },
+  videoChipText: { fontSize: 14, fontWeight: '600', color: '#1a2433' },
+  audioRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    minWidth: 180,
+    marginBottom: 2,
+    paddingVertical: 2,
   },
-  audioRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
-  audioIcon: { fontSize: 16, color: '#1a1a2e' },
-  audioLabel: { fontSize: 14, fontWeight: '600', color: '#1a1a2e' },
+  audioPlayBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  audioPlayBtnMine: { backgroundColor: 'rgba(255,255,255,0.2)' },
+  audioPlayBtnOther: { backgroundColor: '#e8f0fa' },
+  audioMeta: { flex: 1 },
+  audioIcon: { fontSize: 14, color: '#1a2433' },
+  audioLabel: { fontSize: 14, fontWeight: '700', color: '#1a2433' },
+  audioHint: { marginTop: 1, fontSize: 11, color: '#8a97ab' },
   inputRow: {
     flexDirection: 'row',
-    paddingHorizontal: 10,
-    paddingTop: 10,
+    paddingHorizontal: 12,
+    paddingTop: 12,
     backgroundColor: '#fff',
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#d9e0ea',
     alignItems: 'flex-end',
   },
   recordingBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     paddingTop: 12,
     backgroundColor: '#fff5f5',
-    borderTopWidth: 1,
+    borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: '#ffd0d0',
     gap: 8,
   },
@@ -618,7 +777,7 @@ const styles = StyleSheet.create({
   recCancel: { paddingHorizontal: 10, paddingVertical: 8 },
   recCancelText: { color: '#666', fontWeight: '600' },
   recSend: {
-    backgroundColor: '#4a90d9',
+    backgroundColor: '#3b82f6',
     borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 10,
@@ -633,21 +792,23 @@ const styles = StyleSheet.create({
     marginRight: 6,
     marginBottom: 2,
   },
-  attachButtonText: { fontSize: 22, color: '#4a90d9', fontWeight: '600', lineHeight: 24 },
+  attachButtonText: { fontSize: 22, color: '#3b82f6', fontWeight: '600', lineHeight: 24 },
   micButtonText: { fontSize: 16 },
   textInput: {
     flex: 1,
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 20,
+    borderColor: '#d7dee8',
+    backgroundColor: '#f7f9fc',
+    borderRadius: 22,
     paddingHorizontal: 16,
     paddingVertical: 10,
-    fontSize: 14,
+    fontSize: 15,
     maxHeight: 100,
     marginRight: 8,
+    color: '#1a2433',
   },
   sendButton: {
-    backgroundColor: '#4a90d9',
+    backgroundColor: '#3b82f6',
     borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 10,

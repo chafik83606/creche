@@ -141,6 +141,9 @@ service cloud.firestore {
           && (isStaff() || isParent());
         allow update: if isMemberOf(tenantId)
           && resource.data.recipientId == request.auth.uid;
+        // L'auteur peut supprimer ses propres messages (texte / média)
+        allow delete: if isMemberOf(tenantId)
+          && resource.data.senderId == request.auth.uid;
       }
 
       // ─── Consentements RGPD ──────────────────────────────────────────────

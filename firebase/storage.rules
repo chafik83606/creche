@@ -51,6 +51,7 @@ service firebase.storage {
           || request.resource.contentType.matches('video/.*')
           || request.resource.contentType.matches('audio/.*')
         );
+      allow delete: if hasTenantAccess(tenantId);
     }
   }
 }

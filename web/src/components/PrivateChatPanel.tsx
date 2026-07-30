@@ -9,11 +9,13 @@ import {
   onSnapshot,
   addDoc,
   updateDoc,
+  deleteDoc,
   doc,
   serverTimestamp,
 } from 'firebase/firestore';
-import { auth, db } from '@/lib/firebase';
-import { paths, formatFirestoreTime, getFirestoreTime } from '@creche/shared';
+import { deleteObject, refFromURL } from 'firebase/storage';
+import { auth, db, storage } from '@/lib/firebase';
+import { paths, formatHourTime, getHourTime } from '@creche/shared';
 import type { PrivateMessage } from '@creche/shared';
 
 interface Props {
@@ -55,20 +57,36 @@ export function PrivateChatPanel({
 
     function mergeAndSet() {
       const sorted = [...allMessages.values()].sort(
-        (a, b) => getFirestoreTime(a.createdAt) - getFirestoreTime(b.createdAt)
+        (a, b) => getHourTime(a.createdAt) - getHourTime(b.createdAt)
       );
       setMessages(sorted);
     }
 
     const unsubSent = onSnapshot(sentQuery, (snap) => {
-      snap.docs.forEach((d) => allMessages.set(d.id, { id: d.id, ...d.data() } as PrivateMessage));
+      snap.docChanges().forEach((change) => {
+        if (change.type === 'removed') {
+          allMessages.delete(change.doc.id);
+        } else {
+          allMessages.set(change.doc.id, {
+            id: change.doc.id,
+            ...change.doc.data(),
+          } as PrivateMessage);
+        }
+      });
       mergeAndSet();
     });
 
     const unsubReceived = onSnapshot(receivedQuery, (snap) => {
-      snap.docs.forEach((d) => {
-        const msg = { id: d.id, ...d.data() } as PrivateMessage;
-        allMessages.set(d.id, msg);
+      snap.docChanges().forEach((change) => {
+        if (change.type === 'removed') {
+          allMessages.delete(change.doc.id);
+          return;
+        }
+        const msg = {
+          id: change.doc.id,
+          ...change.doc.data(),
+        } as PrivateMessage;
+        allMessages.set(change.doc.id, msg);
         if (msg.recipientId === uid && !msg.readAt) {
           updateDoc(doc(db, paths.privateMessage(tenantId, msg.id)), {
             readAt: serverTimestamp(),
@@ -106,26 +124,58 @@ export function PrivateChatPanel({
     setText('');
   }
 
+  async function deleteMessage(msg: PrivateMessage) {
+    if (msg.senderId !== uid) return;
+    if (!window.confirm('Supprimer ce message ?')) return;
+    try {
+      await deleteDoc(doc(db, paths.privateMessage(tenantId, msg.id)));
+      if (msg.mediaUrl) {
+        try {
+          await deleteObject(refFromURL(storage, msg.mediaUrl));
+        } catch {
+          // ignore storage cleanup errors
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      window.alert('Impossible de supprimer ce message.');
+    }
+  }
+
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)] max-w-2xl mx-auto">
       <div className="px-6 py-4 bg-white border-b">
         <h1 className="text-lg font-semibold text-gray-900">
           Conversation — {recipientName}
         </h1>
+        <p className="mt-1 text-xs text-gray-500">
+          Cliquez sur ✕ pour supprimer vos messages
+        </p>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50">
+      <div className="flex-1 overflow-y-auto p-5 space-y-3.5 bg-slate-50">
         {messages.map((msg) => {
           const isMine = msg.senderId === uid;
           return (
             <div key={msg.id} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
               <div
-                className={`max-w-[75%] rounded-2xl px-4 py-2.5 ${
+                className={`group relative max-w-[78%] rounded-2xl px-4 py-3 shadow-sm ${
                   isMine
-                    ? 'bg-blue-600 text-white rounded-br-sm'
-                    : 'bg-white text-gray-800 border rounded-bl-sm'
+                    ? 'bg-blue-500 text-white rounded-br-md'
+                    : 'bg-white text-gray-800 border border-slate-200 rounded-bl-md'
                 }`}
               >
+                {isMine ? (
+                  <button
+                    type="button"
+                    onClick={() => deleteMessage(msg)}
+                    className="absolute -right-2 -top-2 hidden h-6 w-6 items-center justify-center rounded-full bg-slate-800/80 text-xs text-white group-hover:flex"
+                    aria-label="Supprimer le message"
+                    title="Supprimer"
+                  >
+                    ✕
+                  </button>
+                ) : null}
                 {msg.mediaUrl && msg.mediaType === 'image' ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
@@ -139,8 +189,8 @@ export function PrivateChatPanel({
                     href={msg.mediaUrl}
                     target="_blank"
                     rel="noreferrer"
-                    className={`mb-2 block text-sm font-semibold underline ${
-                      isMine ? 'text-white' : 'text-blue-600'
+                    className={`mb-2 block rounded-xl px-3 py-2 text-sm font-semibold ${
+                      isMine ? 'bg-white/15 text-white' : 'bg-blue-50 text-blue-700'
                     }`}
                   >
                     ▶ Voir la vidéo
@@ -153,10 +203,14 @@ export function PrivateChatPanel({
                 msg.body !== 'Image' &&
                 msg.body !== 'Vidéo' &&
                 msg.body !== 'Message audio' ? (
-                  <p className="text-sm leading-relaxed">{msg.body}</p>
+                  <p className="text-[15px] leading-relaxed">{msg.body}</p>
                 ) : null}
-                <p className={`text-[10px] mt-1 ${isMine ? 'text-blue-200' : 'text-gray-400'}`}>
-                  {formatFirestoreTime(msg.createdAt)}
+                <p
+                  className={`mt-1.5 text-right text-[11px] font-medium ${
+                    isMine ? 'text-blue-100' : 'text-slate-400'
+                  }`}
+                >
+                  {formatHourTime(msg.createdAt)}
                 </p>
               </div>
             </div>
@@ -165,16 +219,16 @@ export function PrivateChatPanel({
         <div ref={bottomRef} />
       </div>
 
-      <form onSubmit={sendMessage} className="p-4 bg-white border-t flex gap-2">
+      <form onSubmit={sendMessage} className="flex gap-2 border-t bg-white p-4">
         <input
-          className="flex-1 border rounded-full px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="flex-1 rounded-full border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           placeholder="Votre message..."
           value={text}
           onChange={(e) => setText(e.target.value)}
         />
         <button
           type="submit"
-          className="px-5 py-2.5 bg-blue-600 text-white rounded-full text-sm font-medium hover:bg-blue-700"
+          className="rounded-full bg-blue-500 px-5 py-2.5 text-sm font-medium text-white hover:bg-blue-600"
         >
           Envoyer
         </button>
