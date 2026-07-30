@@ -74,8 +74,34 @@ const SECTION_TABS: { value: EntrySection; label: string }[] = [
   { value: 'change', label: 'Change' },
 ];
 
+function toDateKey(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 function todayKey(): string {
-  return new Date().toISOString().split('T')[0];
+  return toDateKey(new Date());
+}
+
+function shiftDateKey(key: string, deltaDays: number): string {
+  const [y, m, d] = key.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  date.setDate(date.getDate() + deltaDays);
+  return toDateKey(date);
+}
+
+function formatDisplayDate(key: string): string {
+  const [y, m, d] = key.split('-').map(Number);
+  const date = new Date(y, m - 1, d);
+  const label = date.toLocaleDateString('fr-FR', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+  return label.charAt(0).toUpperCase() + label.slice(1);
 }
 
 interface DayData {
@@ -124,9 +150,15 @@ export function DailyTrackingScreen({
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [dayData, setDayData] = useState<DayData>(EMPTY_DAY);
+  const [date, setDate] = useState(todayKey);
 
-  const date = todayKey();
   const logPath = paths.dailyLog(tenantId, childId, date);
+  const isToday = date === todayKey();
+  const canGoNext = !isToday;
+
+  React.useEffect(() => {
+    setDate(todayKey());
+  }, [childId]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -149,7 +181,7 @@ export function DailyTrackingScreen({
       setLoading(false);
     })();
     return () => { cancelled = true; };
-  }, [tenantId, childId, date]);
+  }, [tenantId, childId, date, logPath]);
 
   async function ensureLogAndUpdate(field: string, entry: Record<string, unknown>) {
     const payload = toFirestoreEntry(entry);
@@ -376,11 +408,45 @@ export function DailyTrackingScreen({
   return (
     <ScrollView style={styles.container}>
       <Text style={styles.title}>Carnet — {childName}</Text>
-      <Text style={styles.date}>{date}</Text>
+
+      <View style={styles.dateNav}>
+        <TouchableOpacity
+          style={styles.dateNavBtn}
+          onPress={() => setDate((prev) => shiftDateKey(prev, -1))}
+          accessibilityLabel="Jour précédent"
+        >
+          <Text style={styles.dateNavBtnText}>‹</Text>
+        </TouchableOpacity>
+        <View style={styles.dateNavCenter}>
+          <Text style={styles.dateNavLabel}>{formatDisplayDate(date)}</Text>
+          {!isToday ? (
+            <TouchableOpacity onPress={() => setDate(todayKey())}>
+              <Text style={styles.dateTodayLink}>Revenir à aujourd’hui</Text>
+            </TouchableOpacity>
+          ) : (
+            <Text style={styles.dateTodayHint}>Aujourd’hui</Text>
+          )}
+        </View>
+        <TouchableOpacity
+          style={[styles.dateNavBtn, !canGoNext && styles.dateNavBtnDisabled]}
+          onPress={() => {
+            if (!canGoNext) return;
+            setDate((prev) => shiftDateKey(prev, 1));
+          }}
+          disabled={!canGoNext}
+          accessibilityLabel="Jour suivant"
+        >
+          <Text style={[styles.dateNavBtnText, !canGoNext && styles.dateNavBtnTextDisabled]}>›</Text>
+        </TouchableOpacity>
+      </View>
 
       {!readOnly && (
         <View style={styles.section}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.sectionTabsScroll}>
+          {!isToday ? (
+            <Text style={styles.pastDayHint}>
+              Vous consultez un jour passé. Vous pouvez toujours ajouter une entrée si besoin.
+            </Text>
+          ) : null}          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.sectionTabsScroll}>
             <View style={styles.sectionTabs}>
               {SECTION_TABS.map((t) => (
                 <TouchableOpacity key={t.value} style={[styles.sectionTab, section === t.value && styles.sectionTabActive]} onPress={() => setSection(t.value)}>
@@ -416,14 +482,20 @@ export function DailyTrackingScreen({
 
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>
-          {readOnly ? 'Journée de votre enfant' : `Entrées du jour (${totalEntries})`}
+          {readOnly
+            ? isToday
+              ? 'Journée de votre enfant'
+              : 'Journée consultée'
+            : `Entrées du jour (${totalEntries})`}
         </Text>
         {loading ? (
           <ActivityIndicator color="#4a90d9" />
         ) : allEntries.length === 0 ? (
           <Text style={styles.emptyText}>
             {readOnly
-              ? "Aucune entrée du carnet pour aujourd'hui (repas, sieste, activités, santé). L'éducateur le remplira pendant la journée."
+              ? isToday
+                ? "Aucune entrée du carnet pour aujourd'hui (repas, sieste, activités, santé). L'éducateur le remplira pendant la journée."
+                : "Aucune entrée du carnet pour cette journée."
               : 'Aucune entrée du carnet pour le moment.'}
           </Text>
         ) : (
@@ -442,8 +514,39 @@ export function DailyTrackingScreen({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8f9fa', padding: 16 },
-  title: { fontSize: 22, fontWeight: '700', color: '#1a1a2e' },
-  date: { fontSize: 14, color: '#666', marginBottom: 20 },
+  title: { fontSize: 22, fontWeight: '700', color: '#1a1a2e', marginBottom: 12 },
+  dateNav: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#e2e8f0',
+  },
+  dateNavBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#eef4fb',
+  },
+  dateNavBtnDisabled: { backgroundColor: '#f3f4f6' },
+  dateNavBtnText: { fontSize: 26, color: '#3b82f6', fontWeight: '600', lineHeight: 28 },
+  dateNavBtnTextDisabled: { color: '#cbd5e1' },
+  dateNavCenter: { flex: 1, alignItems: 'center', paddingHorizontal: 8 },
+  dateNavLabel: { fontSize: 15, fontWeight: '600', color: '#1a2433', textAlign: 'center' },
+  dateTodayHint: { marginTop: 2, fontSize: 12, color: '#64748b' },
+  dateTodayLink: { marginTop: 2, fontSize: 12, color: '#3b82f6', fontWeight: '600' },
+  pastDayHint: {
+    fontSize: 13,
+    color: '#64748b',
+    marginBottom: 10,
+    lineHeight: 18,
+  },
   section: {
     backgroundColor: '#fff',
     borderRadius: 12,

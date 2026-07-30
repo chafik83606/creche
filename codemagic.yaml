@@ -41,7 +41,7 @@ workflows:
           cd mobile
           node <<'NODE'
           const fs = require('fs');
-          const build = String(process.env.BUILD_NUMBER || '14');
+          const build = String(process.env.BUILD_NUMBER || '15');
           const app = JSON.parse(fs.readFileSync('app.json', 'utf8'));
           app.expo.ios = app.expo.ios || {};
           app.expo.android = app.expo.android || {};
@@ -257,7 +257,7 @@ workflows:
           cd mobile
           node <<'NODE'
           const fs = require('fs');
-          const build = String(process.env.BUILD_NUMBER || '14');
+          const build = String(process.env.BUILD_NUMBER || '15');
           const app = JSON.parse(fs.readFileSync('app.json', 'utf8'));
           app.expo.ios = app.expo.ios || {};
           app.expo.android = app.expo.android || {};
