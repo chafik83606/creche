@@ -8,6 +8,7 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
+import { colors } from '../lib/theme';
 import { auth } from '../lib/firebase';
 import type { Consent, ConsentType } from '@creche/shared';
 import {
@@ -118,7 +119,7 @@ export function ConsentManageScreen({
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator color="#4a90d9" />
+        <ActivityIndicator color={colors.primary} />
       </View>
     );
   }
@@ -174,7 +175,7 @@ export function ConsentManageScreen({
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8f9fa' },
+  container: { flex: 1, backgroundColor: colors.background },
   content: { padding: 16 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   heading: { fontSize: 20, fontWeight: '700', color: '#1a1a2e', marginBottom: 8 },
@@ -217,7 +218,7 @@ const styles = StyleSheet.create({
   },
   revokeButtonText: { color: '#e74c3c', fontWeight: '600', fontSize: 14 },
   acceptButton: {
-    backgroundColor: '#4a90d9',
+    backgroundColor: colors.primary,
     borderRadius: 10,
     padding: 12,
     alignItems: 'center',

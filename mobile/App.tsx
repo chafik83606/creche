@@ -7,6 +7,7 @@ import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useAuth } from './hooks/useAuth';
 import { AuthScreen } from './components/AuthScreen';
 import { HomeScreen } from './components/HomeScreen';
+import { colors } from './lib/theme';
 
 const Stack = createNativeStackNavigator();
 
@@ -17,7 +18,7 @@ export default function App() {
     return (
       <SafeAreaProvider>
         <View style={styles.loading}>
-          <ActivityIndicator size="large" color="#4a90d9" />
+          <ActivityIndicator size="large" color={colors.primary} />
         </View>
       </SafeAreaProvider>
     );
@@ -40,5 +41,5 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  loading: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f8f9fa' },
+  loading: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background },
 });

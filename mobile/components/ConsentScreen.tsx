@@ -8,6 +8,7 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
+import { colors } from '../lib/theme';
 import { auth } from '../lib/firebase';
 import type { ConsentType } from '@creche/shared';
 import {
@@ -100,7 +101,7 @@ export function ConsentScreen({ tenantId, childId, onComplete }: Props) {
   if (checking) {
     return (
       <View style={styles.loading}>
-        <ActivityIndicator color="#4a90d9" />
+        <ActivityIndicator color={colors.primary} />
       </View>
     );
   }
@@ -162,13 +163,13 @@ export function ConsentScreen({ tenantId, childId, onComplete }: Props) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8f9fa' },
+  container: { flex: 1, backgroundColor: colors.background },
   content: { padding: 20 },
   loading: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   progress: { marginBottom: 24 },
   progressText: { fontSize: 13, color: '#666', marginBottom: 6 },
   progressBar: { height: 4, backgroundColor: '#e0e0e0', borderRadius: 2 },
-  progressFill: { height: 4, backgroundColor: '#4a90d9', borderRadius: 2 },
+  progressFill: { height: 4, backgroundColor: colors.primary, borderRadius: 2 },
   title: { fontSize: 20, fontWeight: '700', color: '#1a1a2e', marginBottom: 16 },
   bodyCard: {
     backgroundColor: '#fff',
@@ -176,7 +177,7 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 24,
     borderLeftWidth: 4,
-    borderLeftColor: '#4a90d9',
+    borderLeftColor: colors.primary,
   },
   bodyText: { fontSize: 14, lineHeight: 22, color: '#444' },
   checkboxRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 24 },
@@ -185,16 +186,16 @@ const styles = StyleSheet.create({
     height: 24,
     borderRadius: 6,
     borderWidth: 2,
-    borderColor: '#4a90d9',
+    borderColor: colors.primary,
     marginRight: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  checkboxChecked: { backgroundColor: '#4a90d9' },
+  checkboxChecked: { backgroundColor: colors.primary },
   checkmark: { color: '#fff', fontWeight: '700', fontSize: 14 },
   checkboxLabel: { flex: 1, fontSize: 14, color: '#333', lineHeight: 20 },
   button: {
-    backgroundColor: '#4a90d9',
+    backgroundColor: colors.primary,
     borderRadius: 10,
     padding: 16,
     alignItems: 'center',

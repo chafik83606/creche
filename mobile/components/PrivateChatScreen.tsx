@@ -14,6 +14,7 @@ import {
   Alert,
   Linking,
 } from 'react-native';
+import { colors } from '../lib/theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import {
@@ -271,7 +272,7 @@ function ChatComposer({
         accessibilityLabel="Joindre une image ou une vidéo"
       >
         {uploading ? (
-          <ActivityIndicator size="small" color="#4a90d9" />
+          <ActivityIndicator size="small" color={colors.primary} />
         ) : (
           <Text style={styles.attachButtonText}>＋</Text>
         )}
@@ -283,7 +284,7 @@ function ChatComposer({
         accessibilityLabel="Enregistrer un message audio"
       >
         {starting ? (
-          <ActivityIndicator size="small" color="#4a90d9" />
+          <ActivityIndicator size="small" color={colors.primary} />
         ) : (
           <Text style={styles.micButtonText}>🎤</Text>
         )}
@@ -689,7 +690,7 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   bubbleMine: {
-    backgroundColor: '#3b82f6',
+    backgroundColor: colors.primary,
     borderBottomRightRadius: 6,
   },
   bubbleOther: {
@@ -777,7 +778,7 @@ const styles = StyleSheet.create({
   recCancel: { paddingHorizontal: 10, paddingVertical: 8 },
   recCancelText: { color: '#666', fontWeight: '600' },
   recSend: {
-    backgroundColor: '#3b82f6',
+    backgroundColor: colors.primary,
     borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 10,
@@ -792,7 +793,7 @@ const styles = StyleSheet.create({
     marginRight: 6,
     marginBottom: 2,
   },
-  attachButtonText: { fontSize: 22, color: '#3b82f6', fontWeight: '600', lineHeight: 24 },
+  attachButtonText: { fontSize: 22, color: colors.primary, fontWeight: '600', lineHeight: 24 },
   micButtonText: { fontSize: 16 },
   textInput: {
     flex: 1,
@@ -808,7 +809,7 @@ const styles = StyleSheet.create({
     color: '#1a2433',
   },
   sendButton: {
-    backgroundColor: '#3b82f6',
+    backgroundColor: colors.primary,
     borderRadius: 20,
     paddingHorizontal: 16,
     paddingVertical: 10,

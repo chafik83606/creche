@@ -13,6 +13,7 @@ import {
 import { auth } from '../lib/firebase';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '../lib/firebase';
+import { colors, radius, shadow, spacing } from '../lib/theme';
 
 interface Props {
   onDone: () => void;
@@ -57,7 +58,10 @@ export function OnboardingScreen({ onDone }: Props) {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <View style={styles.card}>
-        <Text style={styles.title}>Bienvenue 👋</Text>
+        <View style={styles.iconBadge}>
+          <Text style={styles.iconText}>🏫</Text>
+        </View>
+        <Text style={styles.title}>Bienvenue</Text>
         <Text style={styles.subtitle}>
           Créez votre première crèche pour activer votre espace administrateur.
         </Text>
@@ -65,12 +69,14 @@ export function OnboardingScreen({ onDone }: Props) {
         <TextInput
           style={styles.input}
           placeholder="Nom de la crèche"
+          placeholderTextColor={colors.textMuted}
           value={name}
           onChangeText={setName}
         />
         <TextInput
           style={styles.input}
           placeholder="Adresse (optionnel)"
+          placeholderTextColor={colors.textMuted}
           value={address}
           onChangeText={setAddress}
         />
@@ -79,9 +85,10 @@ export function OnboardingScreen({ onDone }: Props) {
           style={[styles.button, loading && styles.buttonDisabled]}
           onPress={handleCreate}
           disabled={loading}
+          activeOpacity={0.9}
         >
           {loading ? (
-            <ActivityIndicator color="#fff" />
+            <ActivityIndicator color={colors.textOnPrimary} />
           ) : (
             <Text style={styles.buttonText}>Créer ma crèche</Text>
           )}
@@ -99,36 +106,51 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     justifyContent: 'center',
-    padding: 20,
-    backgroundColor: '#f8f9fa',
+    padding: spacing.xl,
+    backgroundColor: colors.background,
   },
   card: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 3,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.xl,
+    ...shadow.card,
   },
-  title: { fontSize: 22, fontWeight: '700', color: '#1a1a2e' },
-  subtitle: { fontSize: 14, color: '#666', marginTop: 8, marginBottom: 16, lineHeight: 20 },
+  iconBadge: {
+    width: 56,
+    height: 56,
+    borderRadius: radius.md,
+    backgroundColor: colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.md,
+  },
+  iconText: { fontSize: 28 },
+  title: { fontSize: 24, fontWeight: '700', color: colors.text },
+  subtitle: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    marginTop: spacing.sm,
+    marginBottom: spacing.lg,
+    lineHeight: 20,
+  },
   input: {
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 10,
-    padding: 12,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceMuted,
+    borderRadius: radius.md,
+    padding: spacing.md,
     fontSize: 14,
-    marginBottom: 10,
+    marginBottom: spacing.sm,
+    color: colors.text,
   },
   button: {
-    marginTop: 8,
-    backgroundColor: '#4a90d9',
-    borderRadius: 10,
-    padding: 14,
+    marginTop: spacing.sm,
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
+    padding: spacing.lg,
     alignItems: 'center',
   },
   buttonDisabled: { opacity: 0.6 },
-  buttonText: { color: '#fff', fontWeight: '600', fontSize: 15 },
-  info: { marginTop: 12, color: '#888', fontSize: 12, lineHeight: 18 },
+  buttonText: { color: colors.textOnPrimary, fontWeight: '700', fontSize: 15 },
+  info: { marginTop: spacing.md, color: colors.textMuted, fontSize: 12, lineHeight: 18 },
 });

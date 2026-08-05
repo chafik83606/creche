@@ -9,6 +9,7 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
+import { colors } from '../lib/theme';
 import {
   doc,
   getDoc,
@@ -537,7 +538,7 @@ export function DailyTrackingScreen({
             : `Entrées du jour (${totalEntries})`}
         </Text>
         {loading ? (
-          <ActivityIndicator color="#4a90d9" />
+          <ActivityIndicator color={colors.primary} />
         ) : allEntries.length === 0 ? (
           <Text style={styles.emptyText}>
             {readOnly
@@ -564,7 +565,7 @@ export function DailyTrackingScreen({
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8f9fa', padding: 16 },
+  container: { flex: 1, backgroundColor: colors.background, padding: 16 },
   title: { fontSize: 22, fontWeight: '700', color: '#1a1a2e', marginBottom: 12 },
   dateNav: {
     flexDirection: 'row',
@@ -586,12 +587,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#eef4fb',
   },
   dateNavBtnDisabled: { backgroundColor: '#f3f4f6' },
-  dateNavBtnText: { fontSize: 26, color: '#3b82f6', fontWeight: '600', lineHeight: 28 },
+  dateNavBtnText: { fontSize: 26, color: colors.primary, fontWeight: '600', lineHeight: 28 },
   dateNavBtnTextDisabled: { color: '#cbd5e1' },
   dateNavCenter: { flex: 1, alignItems: 'center', paddingHorizontal: 8 },
   dateNavLabel: { fontSize: 15, fontWeight: '600', color: '#1a2433', textAlign: 'center' },
   dateTodayHint: { marginTop: 2, fontSize: 12, color: '#64748b' },
-  dateTodayLink: { marginTop: 2, fontSize: 12, color: '#3b82f6', fontWeight: '600' },
+  dateTodayLink: { marginTop: 2, fontSize: 12, color: colors.primary, fontWeight: '600' },
   pastDayHint: {
     fontSize: 13,
     color: '#64748b',
@@ -619,7 +620,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e0e0e0',
   },
-  chipActive: { backgroundColor: '#4a90d9', borderColor: '#4a90d9' },
+  chipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   chipReject: { backgroundColor: '#e74c3c', borderColor: '#e74c3c' },
   chipText: { fontSize: 13, color: '#555' },
   chipTextActive: { color: '#fff', fontWeight: '600' },
@@ -634,7 +635,7 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
   },
   saveButton: {
-    backgroundColor: '#4a90d9',
+    backgroundColor: colors.primary,
     borderRadius: 10,
     padding: 14,
     alignItems: 'center',
@@ -643,7 +644,7 @@ const styles = StyleSheet.create({
   saveButtonDisabled: { opacity: 0.6 },
   saveButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   entryCard: {
-    backgroundColor: '#f8f9fa',
+    backgroundColor: colors.background,
     borderRadius: 8,
     padding: 12,
     marginBottom: 8,
@@ -655,7 +656,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   entryType: { flex: 1, fontWeight: '600', fontSize: 14, color: '#1a1a2e' },
-  entryTime: { fontSize: 13, fontWeight: '600', color: '#3b82f6' },
+  entryTime: { fontSize: 13, fontWeight: '600', color: colors.primary },
   entryDetail: { fontSize: 13, color: '#666', marginTop: 2 },
   entryNotes: { fontSize: 12, color: '#888', marginTop: 4, fontStyle: 'italic' },
   emptyText: { fontSize: 14, color: '#888', lineHeight: 20 },
@@ -667,7 +668,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     backgroundColor: '#f0f0f0',
   },
-  sectionTabActive: { backgroundColor: '#4a90d9' },
+  sectionTabActive: { backgroundColor: colors.primary },
   sectionTabText: { fontSize: 13, color: '#555', fontWeight: '500' },
   sectionTabTextActive: { color: '#fff', fontWeight: '600' },
 });

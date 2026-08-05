@@ -37,7 +37,7 @@ export async function registerForPushNotifications(tenantId: string): Promise<st
       name: 'Crèche',
       importance: Notifications.AndroidImportance.HIGH,
       vibrationPattern: [0, 250, 250, 250],
-      lightColor: '#4a90d9',
+      lightColor: '#E91E8C',
     });
   }
 

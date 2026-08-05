@@ -17,6 +17,7 @@ import { auth, db, functions } from '../lib/firebase';
 import { getCallableErrorMessage } from '../lib/callable-error';
 import { paths, ROLES } from '@creche/shared';
 import type { Child, Group, Tenant, TenantMember, UserRole } from '@creche/shared';
+import { colors } from '../lib/theme';
 import { AnnouncementsScreen } from './AnnouncementsScreen';
 
 type AdminTab = 'overview' | 'members' | 'invitations' | 'children' | 'groups' | 'annonces';
@@ -262,7 +263,7 @@ export function AdminScreen({ tenantId, tenantIds, onTenantChange }: Props) {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator color="#4a90d9" size="large" />
+        <ActivityIndicator color={colors.primary} size="large" />
       </View>
     );
   }
@@ -502,7 +503,7 @@ export function AdminScreen({ tenantId, tenantIds, onTenantChange }: Props) {
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: '#f8f9fa' },
+  flex: { flex: 1, backgroundColor: colors.background },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   tabBarScroll: {
     maxHeight: 48,
@@ -539,7 +540,7 @@ const styles = StyleSheet.create({
     padding: 14,
     alignItems: 'center',
   },
-  statValue: { fontSize: 24, fontWeight: '700', color: '#4a90d9' },
+  statValue: { fontSize: 24, fontWeight: '700', color: colors.primary },
   statLabel: { fontSize: 12, color: '#888', marginTop: 4 },
   hint: { fontSize: 13, color: '#666', lineHeight: 20 },
   tenantPickerSection: { marginBottom: 16 },
@@ -567,7 +568,7 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     fontSize: 12,
     fontWeight: '700',
-    color: '#4a90d9',
+    color: colors.primary,
     backgroundColor: '#eaf2fb',
     paddingHorizontal: 10,
     paddingVertical: 4,

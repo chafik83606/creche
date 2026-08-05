@@ -7,7 +7,7 @@ import {
   ScrollView,
   ActivityIndicator,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Ionicons } from '@expo/vector-icons';
 import { signOut } from 'firebase/auth';
 import {
   collection,
@@ -30,6 +30,8 @@ import { registerForPushNotifications, addNotificationListeners } from '../lib/n
 import { paths } from '@creche/shared';
 import type { UserRole } from '@creche/shared';
 import { isConsentActive, loadConsent } from '../lib/consents';
+import { colors, radius, shadow, spacing } from '../lib/theme';
+import { ScreenHeader } from './ui/ScreenHeader';
 
 const FALLBACK_TENANT_ID = 'demo-creche';
 const FALLBACK_CHILD_ID = 'demo-child-001';
@@ -88,12 +90,16 @@ function ChildPicker({
   );
 }
 
+type TabIcon = keyof typeof Ionicons.glyphMap;
+
 function TabButton({
   label,
+  icon,
   active,
   onPress,
 }: {
   label: string;
+  icon: TabIcon;
   active: boolean;
   onPress: () => void;
 }) {
@@ -101,10 +107,40 @@ function TabButton({
     <TouchableOpacity
       style={[styles.tab, active && styles.tabActive]}
       onPress={onPress}
+      activeOpacity={0.85}
     >
+      <Ionicons
+        name={icon}
+        size={18}
+        color={active ? colors.primary : colors.textMuted}
+      />
       <Text style={[styles.tabText, active && styles.tabTextActive]}>{label}</Text>
     </TouchableOpacity>
   );
+}
+
+function roleLabel(role: UserRole | null | undefined) {
+  switch (role) {
+    case 'parent':
+      return 'Parent';
+    case 'educator':
+      return 'Educateur';
+    case 'director':
+      return 'Directeur';
+    case 'network_admin':
+      return 'Admin reseau';
+    default:
+      return null;
+  }
+}
+
+function displayInitials(name?: string | null, email?: string | null) {
+  const source = name?.trim() || email?.trim() || '?';
+  const parts = source.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+  }
+  return source.slice(0, 2).toUpperCase();
 }
 
 async function fetchChildrenByIds(
@@ -234,7 +270,7 @@ function EducatorHome({
   if (loading || !selectedChild) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator color="#4a90d9" />
+        <ActivityIndicator color={colors.primary} />
       </View>
     );
   }
@@ -247,9 +283,9 @@ function EducatorHome({
         onSelect={setSelectedChildId}
       />
       <View style={styles.tabBar}>
-        <TabButton label="Carnet" active={tab === 'carnet'} onPress={() => setTab('carnet')} />
-        <TabButton label="Annonces" active={tab === 'annonces'} onPress={() => setTab('annonces')} />
-        <TabButton label="Messages" active={tab === 'messages'} onPress={() => setTab('messages')} />
+        <TabButton icon="book-outline" label="Carnet" active={tab === 'carnet'} onPress={() => setTab('carnet')} />
+        <TabButton icon="megaphone-outline" label="Annonces" active={tab === 'annonces'} onPress={() => setTab('annonces')} />
+        <TabButton icon="chatbubble-outline" label="Messages" active={tab === 'messages'} onPress={() => setTab('messages')} />
       </View>
       {tab === 'carnet' && (
         <DailyTrackingScreen
@@ -346,7 +382,7 @@ function ParentHome({
   if (loading || !consentChecked) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator color="#4a90d9" />
+        <ActivityIndicator color={colors.primary} />
       </View>
     );
   }
@@ -377,10 +413,10 @@ function ParentHome({
         onSelect={setSelectedChildId}
       />
       <View style={styles.tabBar}>
-        <TabButton label="Carnet" active={tab === 'carnet'} onPress={() => setTab('carnet')} />
-        <TabButton label="Annonces" active={tab === 'annonces'} onPress={() => setTab('annonces')} />
-        <TabButton label="Messages" active={tab === 'messages'} onPress={() => setTab('messages')} />
-        <TabButton label="Consent." active={tab === 'consentements'} onPress={() => setTab('consentements')} />
+        <TabButton icon="book-outline" label="Carnet" active={tab === 'carnet'} onPress={() => setTab('carnet')} />
+        <TabButton icon="megaphone-outline" label="Annonces" active={tab === 'annonces'} onPress={() => setTab('annonces')} />
+        <TabButton icon="chatbubble-outline" label="Messages" active={tab === 'messages'} onPress={() => setTab('messages')} />
+        <TabButton icon="shield-checkmark-outline" label="Consent." active={tab === 'consentements'} onPress={() => setTab('consentements')} />
       </View>
       {tab === 'carnet' && (
         <DailyTrackingScreen
@@ -458,15 +494,15 @@ function DirectorHome({ tenantId }: { tenantId: string }) {
   );
 
   if (dirLoading) {
-    return <View style={styles.centered}><ActivityIndicator color="#4a90d9" /></View>;
+    return <View style={styles.centered}><ActivityIndicator color={colors.primary} /></View>;
   }
 
   return (
     <View style={styles.flex}>
       <View style={styles.tabBar}>
-        <TabButton label="Annonces" active={tab === 'annonces'} onPress={() => setTab('annonces')} />
-        <TabButton label="Carnet" active={tab === 'carnet'} onPress={() => setTab('carnet')} />
-        <TabButton label="Messages" active={tab === 'messages'} onPress={() => setTab('messages')} />
+        <TabButton icon="megaphone-outline" label="Annonces" active={tab === 'annonces'} onPress={() => setTab('annonces')} />
+        <TabButton icon="book-outline" label="Carnet" active={tab === 'carnet'} onPress={() => setTab('carnet')} />
+        <TabButton icon="chatbubble-outline" label="Messages" active={tab === 'messages'} onPress={() => setTab('messages')} />
       </View>
 
       {tab === 'annonces' && <AnnouncementsScreen tenantId={tenantId} canSend />}
@@ -506,7 +542,6 @@ function DirectorHome({ tenantId }: { tenantId: string }) {
 
 export function HomeScreen() {
   const { role, user, claims } = useAuth();
-  const insets = useSafeAreaInsets();
 
   const tenantIds = claims?.tenantIds?.length ? claims.tenantIds : [FALLBACK_TENANT_ID];
   const [activeTenantId, setActiveTenantId] = useState(tenantIds[0]);
@@ -531,17 +566,33 @@ export function HomeScreen() {
     return addNotificationListeners();
   }, [user, tenantId]);
 
+  const greetingName = user?.displayName?.split(' ')[0] ?? user?.email?.split('@')[0] ?? 'vous';
+  const subtitle = roleLabel(role);
+
   return (
     <View style={styles.flex}>
-      <View style={[styles.header, { paddingTop: Math.max(insets.top, 12) + 12 }]}>
-        <Text style={styles.headerTitle}>Zibou</Text>
-        <TouchableOpacity onPress={() => signOut(auth)}>
-          <Text style={styles.logout}>Deconnexion</Text>
-        </TouchableOpacity>
+      <ScreenHeader
+        title="Zibou"
+        subtitle={subtitle ?? undefined}
+        onLogout={() => signOut(auth)}
+      />
+      <View style={styles.welcomeCard}>
+        <View style={styles.avatar}>
+          <Text style={styles.avatarText}>
+            {displayInitials(user?.displayName, user?.email)}
+          </Text>
+        </View>
+        <View style={styles.welcomeTextBlock}>
+          <Text style={styles.welcomeTitle}>Bonjour, {greetingName}</Text>
+          <Text style={styles.welcomeSubtitle}>
+            {role === 'parent'
+              ? 'Suivez la journee de votre enfant'
+              : role === 'educator'
+                ? 'Saisissez le suivi quotidien'
+                : 'Gerez votre etablissement'}
+          </Text>
+        </View>
       </View>
-      <Text style={styles.welcome}>
-        Bonjour {user?.displayName ?? user?.email}
-      </Text>
 
       {role === 'educator' && (
         <EducatorHome tenantId={tenantId} groupIds={groupIds} />
@@ -563,51 +614,93 @@ export function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1, backgroundColor: '#f8f9fa' },
+  flex: { flex: 1, backgroundColor: colors.background },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header: {
+  welcomeCard: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    backgroundColor: '#4a90d9',
+    gap: spacing.md,
+    marginHorizontal: spacing.lg,
+    marginTop: -spacing.sm,
+    marginBottom: spacing.sm,
+    padding: spacing.lg,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadow.sm,
   },
-  headerTitle: { fontSize: 20, fontWeight: '700', color: '#fff' },
-  logout: { color: 'rgba(255,255,255,0.85)', fontSize: 14 },
-  welcome: { padding: 16, fontSize: 15, color: '#444', backgroundColor: '#fff' },
+  avatar: {
+    width: 48,
+    height: 48,
+    borderRadius: radius.full,
+    backgroundColor: colors.primaryLight,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatarText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  welcomeTextBlock: { flex: 1 },
+  welcomeTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.text,
+  },
+  welcomeSubtitle: {
+    marginTop: 2,
+    fontSize: 13,
+    color: colors.textSecondary,
+    lineHeight: 18,
+  },
   childPicker: {
-    maxHeight: 52,
-    backgroundColor: '#fff',
+    maxHeight: 56,
+    backgroundColor: colors.surface,
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: colors.border,
   },
   childPickerContent: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 8,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    gap: spacing.sm,
     alignItems: 'center',
   },
   childChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 16,
-    backgroundColor: '#f0f0f0',
-    marginRight: 8,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.full,
+    backgroundColor: colors.surfaceMuted,
+    marginRight: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
   },
-  childChipActive: { backgroundColor: '#4a90d9' },
-  childChipText: { fontSize: 13, color: '#555', fontWeight: '500' },
-  childChipTextActive: { color: '#fff', fontWeight: '600' },
+  childChipActive: {
+    backgroundColor: colors.primaryLight,
+    borderColor: colors.primaryMuted,
+  },
+  childChipText: { fontSize: 13, color: colors.textSecondary, fontWeight: '500' },
+  childChipTextActive: { color: colors.primary, fontWeight: '700' },
   tabBar: {
     flexDirection: 'row',
-    backgroundColor: '#fff',
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
+    gap: spacing.xs,
     borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
+    borderBottomColor: colors.border,
   },
-  tab: { flex: 1, paddingVertical: 12, alignItems: 'center' },
-  tabActive: { borderBottomWidth: 2, borderBottomColor: '#4a90d9' },
-  tabText: { fontSize: 14, color: '#888' },
-  tabTextActive: { color: '#4a90d9', fontWeight: '600' },
+  tab: {
+    flex: 1,
+    paddingVertical: spacing.sm,
+    alignItems: 'center',
+    borderRadius: radius.md,
+    gap: 4,
+  },
+  tabActive: { backgroundColor: colors.primaryLight },
+  tabText: { fontSize: 11, color: colors.textMuted, fontWeight: '500' },
+  tabTextActive: { color: colors.primary, fontWeight: '700' },
   noRole: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
-  noRoleText: { textAlign: 'center', color: '#666', fontSize: 15, lineHeight: 22 },
+  noRoleText: { textAlign: 'center', color: colors.textSecondary, fontSize: 15, lineHeight: 22 },
 });

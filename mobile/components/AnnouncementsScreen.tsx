@@ -10,6 +10,7 @@ import {
   Switch,
   ActivityIndicator,
 } from 'react-native';
+import { colors } from '../lib/theme';
 import {
   collection,
   query,
@@ -288,7 +289,7 @@ export function AnnouncementsScreen({
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f8f9fa', padding: 16 },
+  container: { flex: 1, backgroundColor: colors.background, padding: 16 },
   sectionHint: {
     fontSize: 13,
     color: '#666',
@@ -296,7 +297,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   newButton: {
-    backgroundColor: '#4a90d9',
+    backgroundColor: colors.primary,
     borderRadius: 10,
     padding: 12,
     alignItems: 'center',
@@ -312,7 +313,7 @@ const styles = StyleSheet.create({
   audienceBlock: { marginBottom: 12 },
   audienceNote: {
     fontSize: 13,
-    color: '#4a90d9',
+    color: colors.primary,
     fontWeight: '500',
     marginBottom: 12,
   },
@@ -326,7 +327,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e0e0e0',
   },
-  chipActive: { backgroundColor: '#4a90d9', borderColor: '#4a90d9' },
+  chipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   chipText: { fontSize: 13, color: '#555' },
   chipTextActive: { color: '#fff', fontWeight: '600' },
   input: {
@@ -382,7 +383,7 @@ const styles = StyleSheet.create({
   badgeGroup: {
     fontSize: 11,
     fontWeight: '600',
-    color: '#4a90d9',
+    color: colors.primary,
     backgroundColor: '#eaf2fb',
     paddingHorizontal: 8,
     paddingVertical: 3,
